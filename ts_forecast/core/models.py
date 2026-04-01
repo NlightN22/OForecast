@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 from dataclasses import dataclass
 from typing import Optional, Dict
 
@@ -12,6 +13,14 @@ try:
     HAS_PMDARIMA = True
 except Exception:
     HAS_PMDARIMA = False
+
+try:
+    from statsforecast import StatsForecast
+    from statsforecast.models import MSTL, CrostonSBA, TSB, ADIDA, IMAPA
+
+    HAS_STATSFORECAST = True
+except Exception:
+    HAS_STATSFORECAST = False
 
 
 @dataclass(frozen=True)
@@ -87,6 +96,65 @@ def arima_forecast_log(
         return float(model.predict(n_periods=1)[0])
     except Exception:
         return float(ylog_train[-1])
+
+
+def statsforecast_one_step(
+    ds: pd.Series,
+    y_train: np.ndarray,
+    seasonal_length: int,
+) -> Dict[str, float]:
+    if not HAS_STATSFORECAST:
+        return {}
+    if len(y_train) < 3:
+        return {}
+    df = pd.DataFrame(
+        {
+            "unique_id": "series",
+            "ds": pd.to_datetime(ds),
+            "y": y_train,
+        }
+    )
+
+    models = []
+    if len(y_train) >= max(2 * seasonal_length, seasonal_length + 1):
+        try:
+            models.append(MSTL(season_length=seasonal_length))
+        except Exception:
+            pass
+    try:
+        models.append(CrostonSBA())
+    except Exception:
+        pass
+    try:
+        models.append(TSB(alpha_d=0.1, alpha_p=0.1))
+    except Exception:
+        pass
+    try:
+        models.append(ADIDA())
+    except Exception:
+        pass
+    try:
+        models.append(IMAPA())
+    except Exception:
+        pass
+    if not models:
+        return {}
+
+    try:
+        sf = StatsForecast(models=models, freq="MS")
+        fcst = sf.forecast(df=df, h=1)
+    except Exception:
+        return {}
+
+    out: Dict[str, float] = {}
+    for col in fcst.columns:
+        if col in ("unique_id", "ds"):
+            continue
+        try:
+            out[f"SF_{col}"] = float(fcst[col].iloc[0])
+        except Exception:
+            continue
+    return out
 
 
 def available_model_names(

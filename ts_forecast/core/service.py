@@ -19,6 +19,8 @@ from .models import (
     seasonal_naive_y,
     arima_forecast_log,
     HAS_PMDARIMA,
+    HAS_STATSFORECAST,
+    statsforecast_one_step,
 )
 
 
@@ -84,6 +86,11 @@ def forecast_next_month(
         if a is not None:
             full_y["AutoARIMA_log"] = safe_expm1(a)
 
+    # StatsForecast (y)
+    sf = statsforecast_one_step(df["month"], y_full, cfg.statsforecast_seasonal_length)
+    for name, value in sf.items():
+        full_y[name] = value
+
     # chosen point forecast
     if chosen_name == "Ensemble_top3_weighted":
         ranked = sorted(
@@ -131,6 +138,8 @@ def run_forecast(
     log("transforms: ok")
 
     log("backtest: start")
+    if not HAS_STATSFORECAST:
+        log("statsforecast: unavailable (optional)")
     ds_name, bt = choose_dataset(df, cfg)
     robust = ds_name != "A_raw"
     log(f"backtest: chosen_dataset={ds_name}")

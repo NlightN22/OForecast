@@ -7,8 +7,14 @@ from typing import Dict, List
 
 from .config import ForecastConfig
 from .models import (
-    winsorize_log, safe_expm1,
-    ses_forecast_log, ets_forecast_log, seasonal_naive_y, arima_forecast_log, HAS_PMDARIMA
+    winsorize_log,
+    safe_expm1,
+    ses_forecast_log,
+    ets_forecast_log,
+    seasonal_naive_y,
+    arima_forecast_log,
+    HAS_PMDARIMA,
+    statsforecast_one_step,
 )
 
 @dataclass
@@ -66,6 +72,11 @@ def walk_forward(df: pd.DataFrame, cfg: ForecastConfig, robust: bool, include_ar
             )
             if a is not None:
                 preds.setdefault("AutoARIMA_log", []).append(safe_expm1(a))
+
+        # StatsForecast (y)
+        sf = statsforecast_one_step(train["month"], y_train, cfg.statsforecast_seasonal_length)
+        for name, value in sf.items():
+            preds.setdefault(name, []).append(value)
 
         months.append(df.loc[i, "month"])
         actual.append(float(df.loc[i, "y"]))

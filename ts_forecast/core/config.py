@@ -28,3 +28,6 @@ class ForecastConfig:
     # Ensemble rule
     ensemble_topk: int = 3
     ensemble_max_degradation: float = 0.05  # <= best*(1+5%)
+
+    # StatsForecast
+    statsforecast_seasonal_length: int = 12
