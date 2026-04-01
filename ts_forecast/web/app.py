@@ -7,23 +7,46 @@ import threading
 from fastapi import Body, FastAPI, Form
 from fastapi.responses import HTMLResponse, StreamingResponse
 
+from ..core.config import ForecastConfig
+from ..core.models import model_catalog
 from ..core.service import run_forecast, format_result_text
 from ..interfaces.schemas import ForecastRequest, ForecastResponse
 
 app = FastAPI(title="OForecast", version="0.1.0")
 
-FORM_HTML = """<!doctype html>
+CFG = ForecastConfig()
+MODEL_OPTIONS = model_catalog(CFG.ets_trends, CFG.ets_seasonals)
+
+
+def render_form(selected_models: list[str] | None = None, use_all: bool = True) -> str:
+    selected = set(selected_models or [])
+    options_html = "\n".join(
+        f'<option value="{html.escape(name)}"{" selected" if (use_all or name in selected) else ""}>'
+        f"{html.escape(name)}</option>"
+        for name in MODEL_OPTIONS
+    )
+    use_all_checked = " checked" if use_all else ""
+    return f"""<!doctype html>
 <meta charset="utf-8">
 <title>OForecast</title>
 <style>
-body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; padding: 24px; }
-textarea { width: 100%; max-width: 900px; height: 320px; }
-pre { white-space: pre-wrap; background: #f6f6f6; padding: 12px; border: 1px solid #ddd; }
+body {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; padding: 24px; }}
+textarea {{ width: 100%; max-width: 900px; height: 320px; }}
+select {{ width: 100%; max-width: 900px; height: 180px; }}
+pre {{ white-space: pre-wrap; background: #f6f6f6; padding: 12px; border: 1px solid #ddd; }}
 </style>
 <h1>OForecast</h1>
 <form id="forecast-form" method="post" action="/forecast/form">
-  <textarea id="raw" name="raw" placeholder="Вставьте данные как в data.txt"></textarea>
-  <br><button id="run-btn" type="submit">Рассчитать</button>
+  <textarea id="raw" name="raw" placeholder="Paste data here (same format as data.txt)"></textarea>
+  <div>
+    <label><input type="checkbox" id="use_all" name="use_all"{use_all_checked}> Use all models</label>
+  </div>
+  <div>
+    <select id="models" name="models" multiple>
+      {options_html}
+    </select>
+  </div>
+  <br><button id="run-btn" type="submit">Run forecast</button>
 </form>
 <h2>Progress</h2>
 <pre id="log"></pre>
@@ -31,48 +54,61 @@ pre { white-space: pre-wrap; background: #f6f6f6; padding: 12px; border: 1px sol
 const form = document.getElementById("forecast-form");
 const log = document.getElementById("log");
 const rawInput = document.getElementById("raw");
-form.addEventListener("submit", async (e) => {
+const modelsSelect = document.getElementById("models");
+const useAll = document.getElementById("use_all");
+const syncModels = () => {{
+  modelsSelect.disabled = useAll.checked;
+}};
+useAll.addEventListener("change", syncModels);
+syncModels();
+form.addEventListener("submit", async (e) => {{
   e.preventDefault();
   log.textContent = "";
-  const resp = await fetch("/forecast/stream", {
+  const selected = Array.from(modelsSelect.selectedOptions).map((o) => o.value);
+  const payload = {{
+    raw: rawInput.value,
+    models: selected,
+    use_all: useAll.checked
+  }};
+  const resp = await fetch("/forecast/stream", {{
     method: "POST",
-    headers: { "Content-Type": "text/plain" },
-    body: rawInput.value
-  });
+    headers: {{ "Content-Type": "application/json" }},
+    body: JSON.stringify(payload)
+  }});
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  while (true) {
-    const { value, done } = await reader.read();
+  while (true) {{
+    const {{ value, done }} = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+    buffer += decoder.decode(value, {{ stream: true }});
     const parts = buffer.split("\\n\\n");
     buffer = parts.pop();
-    for (const part of parts) {
+    for (const part of parts) {{
       const lines = part.split("\\n");
-      for (const line of lines) {
+      for (const line of lines) {{
         if (!line.startsWith("data:")) continue;
         let msg = line.slice(5);
         if (msg.startsWith(" ")) msg = msg.slice(1);
         if (msg === "[done]") continue;
         log.textContent += msg + "\\n";
         log.scrollTop = log.scrollHeight;
-      }
-    }
-  }
-});
+      }}
+    }}
+  }}
+}});
 </script>
 """
 
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
-    return FORM_HTML
+    return render_form()
 
 
 @app.post("/forecast", response_model=ForecastResponse)
 def forecast_json(payload: ForecastRequest) -> ForecastResponse:
-    res = run_forecast(payload.raw)
+    res = run_forecast(payload.raw, models=payload.models, use_all=payload.use_all)
     return ForecastResponse(
         rows_in=res.rows_in,
         rows_after_fill=res.rows_after_fill,
@@ -94,14 +130,18 @@ def forecast_text(raw: str = Body(..., media_type="text/plain")) -> str:
 
 
 @app.post("/forecast/form", response_class=HTMLResponse)
-def forecast_form(raw: str = Form(...)) -> str:
-    res = run_forecast(raw)
+def forecast_form(
+    raw: str = Form(...),
+    models: list[str] = Form(default=[]),
+    use_all: bool = Form(False),
+) -> str:
+    res = run_forecast(raw, models=models, use_all=use_all)
     text = html.escape(format_result_text(res))
-    return FORM_HTML + f"<h2>Result</h2><pre>{text}</pre>"
+    return render_form(selected_models=models, use_all=use_all) + f"<h2>Result</h2><pre>{text}</pre>"
 
 
 @app.post("/forecast/stream")
-def forecast_stream(raw: str = Body(..., media_type="text/plain")) -> StreamingResponse:
+def forecast_stream(payload: ForecastRequest) -> StreamingResponse:
     q: queue.Queue[tuple[str, str]] = queue.Queue()
     done = threading.Event()
 
@@ -110,7 +150,12 @@ def forecast_stream(raw: str = Body(..., media_type="text/plain")) -> StreamingR
 
     def worker() -> None:
         try:
-            res = run_forecast(raw, on_log=on_log)
+            res = run_forecast(
+                payload.raw,
+                on_log=on_log,
+                models=payload.models,
+                use_all=payload.use_all,
+            )
             q.put(("result", format_result_text(res)))
         except Exception as exc:
             q.put(("error", f"ERROR: {exc}"))

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass
-from typing import Optional, Dict
+from typing import Optional, Dict, Iterable
 
 from statsmodels.tsa.holtwinters import SimpleExpSmoothing, ExponentialSmoothing
 
@@ -109,6 +109,7 @@ def statsforecast_one_step(
     ds: pd.Series,
     y_train: np.ndarray,
     seasonal_length: int,
+    allowed_models: Optional[set[str]] = None,
 ) -> Dict[str, float]:
     if not HAS_STATSFORECAST:
         return {}
@@ -122,26 +123,34 @@ def statsforecast_one_step(
         }
     )
 
+    def want_sf(name: str) -> bool:
+        return allowed_models is None or f"SF_{name}" in allowed_models
+
     models = []
     if len(y_train) >= max(2 * seasonal_length, seasonal_length + 1):
         try:
-            models.append(MSTL(season_length=seasonal_length))
+            if want_sf("MSTL"):
+                models.append(MSTL(season_length=seasonal_length))
         except Exception:
             pass
     try:
-        models.append(CrostonSBA())
+        if want_sf("CrostonSBA"):
+            models.append(CrostonSBA())
     except Exception:
         pass
     try:
-        models.append(TSB(alpha_d=0.1, alpha_p=0.1))
+        if want_sf("TSB"):
+            models.append(TSB(alpha_d=0.1, alpha_p=0.1))
     except Exception:
         pass
     try:
-        models.append(ADIDA())
+        if want_sf("ADIDA"):
+            models.append(ADIDA())
     except Exception:
         pass
     try:
-        models.append(IMAPA())
+        if want_sf("IMAPA"):
+            models.append(IMAPA())
     except Exception:
         pass
     if not models:
@@ -162,6 +171,21 @@ def statsforecast_one_step(
         except Exception:
             continue
     return out
+
+
+def model_catalog(ets_trends: Iterable, ets_seasonals: Iterable) -> list[str]:
+    names = ["SES_log", "SeasonalNaive_y"]
+    for tr in ets_trends:
+        for seas in ets_seasonals:
+            names.append(f"ETS_log_trend={tr}_seasonal={seas}")
+    names.append("AutoARIMA_log")
+    names.extend(["SF_MSTL", "SF_CrostonSBA", "SF_TSB", "SF_ADIDA", "SF_IMAPA"])
+    names.append("TBATS_y")
+    return names
+
+
+def should_use_model(allowed_models: Optional[set[str]], name: str) -> bool:
+    return allowed_models is None or name in allowed_models
 
 
 def tbats_forecast_y(

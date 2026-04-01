@@ -4,3 +4,5 @@ pydantic>=2.6
 python-multipart>=0.0.9
 statsforecast>=1.7
 sktime>=0.28
+tbats
+scikit-learn<1.6

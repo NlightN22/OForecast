@@ -7,6 +7,14 @@ from pydantic import BaseModel, Field
 
 class ForecastRequest(BaseModel):
     raw: str = Field(..., description="Raw time series text (tab-separated, same as data.txt)")
+    models: List[str] | None = Field(
+        default=None,
+        description="Optional list of model names to run",
+    )
+    use_all: bool = Field(
+        default=True,
+        description="Use all available models (ignores models list when true)",
+    )
 
 
 class ForecastResponse(BaseModel):

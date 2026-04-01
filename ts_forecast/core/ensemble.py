@@ -11,6 +11,13 @@ def build_ensemble_or_best(
     topk: int,
     max_degradation: float,
 ) -> Tuple[str, np.ndarray, Dict[str, dict]]:
+    if len(preds_y) <= 1:
+        model_metrics = {m: calc_metrics(actual_y, p) for m, p in preds_y.items()}
+        if not model_metrics:
+            return "None", np.zeros_like(actual_y, dtype=float), model_metrics
+        best_name = next(iter(model_metrics))
+        return best_name, preds_y[best_name], model_metrics
+
     model_metrics = {m: calc_metrics(actual_y, p) for m, p in preds_y.items()}
     ranked = sorted(model_metrics.items(), key=lambda kv: kv[1]["MAE"])
     best_name, best_m = ranked[0][0], ranked[0][1]

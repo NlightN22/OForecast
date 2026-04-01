@@ -23,6 +23,8 @@ from .models import (
     statsforecast_one_step,
     HAS_SKTIME,
     tbats_forecast_y,
+    model_catalog,
+    should_use_model,
 )
 
 
@@ -52,6 +54,7 @@ def forecast_next_month(
     robust: bool,
     chosen_name: str,
     metrics: dict,
+    allowed_models: Optional[set[str]] = None,
     on_log: Optional[Callable[[str], None]] = None,
 ) -> tuple[float, float]:
     def log(msg: str) -> None:
@@ -70,7 +73,8 @@ def forecast_next_month(
     full_y = {}
 
     # SES
-    full_y["SES_log"] = safe_expm1(ses_forecast_log(ylog_train))
+    if should_use_model(allowed_models, "SES_log"):
+        full_y["SES_log"] = safe_expm1(ses_forecast_log(ylog_train))
 
     # ETS grid
     use_seasonal = len(ylog_train) >= cfg.ets_seasonal_min_n
@@ -80,13 +84,15 @@ def forecast_next_month(
                 continue
             sp = cfg.ets_seasonal_periods if seas is not None else None
             name = f"ETS_log_trend={tr}_seasonal={seas}"
-            full_y[name] = safe_expm1(ets_forecast_log(ylog_train, tr, seas, sp))
+            if should_use_model(allowed_models, name):
+                full_y[name] = safe_expm1(ets_forecast_log(ylog_train, tr, seas, sp))
 
     # Seasonal naive
-    full_y["SeasonalNaive_y"] = seasonal_naive_y(y_full)
+    if should_use_model(allowed_models, "SeasonalNaive_y"):
+        full_y["SeasonalNaive_y"] = seasonal_naive_y(y_full)
 
     # ARIMA
-    if HAS_PMDARIMA:
+    if HAS_PMDARIMA and should_use_model(allowed_models, "AutoARIMA_log"):
         a = arima_forecast_log(
             ylog_train, cfg.arima_m, cfg.arima_stepwise, cfg.arima_max_pq, cfg.arima_max_pq_seas
         )
@@ -94,16 +100,22 @@ def forecast_next_month(
             full_y["AutoARIMA_log"] = safe_expm1(a)
 
     # StatsForecast (y)
-    sf = statsforecast_one_step(df["month"], y_full, cfg.statsforecast_seasonal_length)
+    sf = statsforecast_one_step(
+        df["month"],
+        y_full,
+        cfg.statsforecast_seasonal_length,
+        allowed_models=allowed_models,
+    )
     for name, value in sf.items():
         full_y[name] = value
 
     # TBATS (y)
-    tb, tb_err = tbats_forecast_y(y_full, cfg.tbats_seasonal_periods, cfg.tbats_min_n)
-    if tb is not None:
-        full_y["TBATS_y"] = tb
-    elif HAS_SKTIME and len(y_full) >= cfg.tbats_min_n:
-        log(f"sktime.tbats: failed ({tb_err})")
+    if should_use_model(allowed_models, "TBATS_y"):
+        tb, tb_err = tbats_forecast_y(y_full, cfg.tbats_seasonal_periods, cfg.tbats_min_n)
+        if tb is not None:
+            full_y["TBATS_y"] = tb
+        elif HAS_SKTIME and len(y_full) >= cfg.tbats_min_n:
+            log(f"sktime.tbats: failed ({tb_err})")
 
     # chosen point forecast
     if chosen_name == "Ensemble_top3_weighted":
@@ -138,6 +150,8 @@ def run_forecast(
     raw: str,
     cfg: ForecastConfig = ForecastConfig(),
     on_log: Optional[Callable[[str], None]] = None,
+    models: Optional[list[str]] = None,
+    use_all: bool = True,
 ) -> ForecastResult:
     def log(msg: str) -> None:
         if on_log is not None:
@@ -150,6 +164,36 @@ def run_forecast(
     log(f"fill_missing_months: missing={miss_n} rows_after_fill={len(df1)}")
     df = add_transforms(df1)
     log("transforms: ok")
+
+    all_models = set(model_catalog(cfg.ets_trends, cfg.ets_seasonals))
+    if use_all or not models:
+        allowed_models = None
+    else:
+        requested = [m for m in models if m in all_models]
+        unknown = [m for m in (models or []) if m not in all_models]
+        if unknown:
+            log(f"models: ignoring unknown: {', '.join(unknown)}")
+        if not requested:
+            log("models: none selected, using all")
+            allowed_models = None
+        else:
+            allowed_models = set(requested)
+
+    if allowed_models is not None:
+        if not HAS_PMDARIMA and "AutoARIMA_log" in allowed_models:
+            allowed_models.discard("AutoARIMA_log")
+            log("models: AutoARIMA_log skipped (pmdarima unavailable)")
+        if not HAS_STATSFORECAST:
+            sf_removed = {m for m in allowed_models if m.startswith("SF_")}
+            if sf_removed:
+                allowed_models.difference_update(sf_removed)
+                log("models: statsforecast models skipped (unavailable)")
+        if not HAS_SKTIME and "TBATS_y" in allowed_models:
+            allowed_models.discard("TBATS_y")
+            log("models: TBATS_y skipped (sktime unavailable)")
+        if not allowed_models:
+            log("models: no available selections, using all")
+            allowed_models = None
 
     log("backtest: start")
     if not HAS_STATSFORECAST:
@@ -166,7 +210,7 @@ def run_forecast(
     else:
         if len(df) < cfg.tbats_min_n:
             log(f"sktime.tbats: skipped (n<{cfg.tbats_min_n})")
-    ds_name, bt = choose_dataset(df, cfg)
+    ds_name, bt = choose_dataset(df, cfg, allowed_models=allowed_models, on_log=log)
     robust = ds_name != "A_raw"
     log(f"backtest: chosen_dataset={ds_name}")
 
@@ -186,7 +230,15 @@ def run_forecast(
 
     # point forecast + intervals for next month
     log("intervals: start")
-    point_y, point_log = forecast_next_month(df, cfg, robust, chosen_name, all_metrics, on_log=log)
+    point_y, point_log = forecast_next_month(
+        df,
+        cfg,
+        robust,
+        chosen_name,
+        all_metrics,
+        allowed_models=allowed_models,
+        on_log=log,
+    )
     intervals = bootstrap_intervals_log1p(errors_log, point_log, cfg.bootstrap_n, cfg.seed)
     _ = point_y
     log("intervals: ok")
