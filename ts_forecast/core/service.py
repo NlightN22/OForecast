@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
@@ -112,20 +113,36 @@ class ForecastResult:
     intervals: pd.DataFrame
 
 
-def run_forecast(raw: str, cfg: ForecastConfig = ForecastConfig()) -> ForecastResult:
-    df0 = read_tsv_like(raw)
-    df1, miss_n = fill_missing_months(df0)
-    df = add_transforms(df1)
+def run_forecast(
+    raw: str,
+    cfg: ForecastConfig = ForecastConfig(),
+    on_log: Optional[Callable[[str], None]] = None,
+) -> ForecastResult:
+    def log(msg: str) -> None:
+        if on_log is not None:
+            on_log(msg)
 
+    log("parse: start")
+    df0 = read_tsv_like(raw)
+    log(f"parse: ok rows={len(df0)}")
+    df1, miss_n = fill_missing_months(df0)
+    log(f"fill_missing_months: missing={miss_n} rows_after_fill={len(df1)}")
+    df = add_transforms(df1)
+    log("transforms: ok")
+
+    log("backtest: start")
     ds_name, bt = choose_dataset(df, cfg)
     robust = ds_name != "A_raw"
+    log(f"backtest: chosen_dataset={ds_name}")
 
+    log("ensemble: start")
     chosen_name, chosen_bt_forecast, all_metrics = build_ensemble_or_best(
         actual_y=bt.actual_y,
         preds_y=bt.preds_y,
         topk=cfg.ensemble_topk,
         max_degradation=cfg.ensemble_max_degradation,
     )
+    log(f"ensemble: chosen_model={chosen_name}")
 
     bt_df = backtest_table(bt.months, bt.actual_y, chosen_bt_forecast)
 
@@ -133,14 +150,17 @@ def run_forecast(raw: str, cfg: ForecastConfig = ForecastConfig()) -> ForecastRe
     errors_log = np.log1p(bt.actual_y) - np.log1p(np.maximum(chosen_bt_forecast, 0.0) + 1e-9)
 
     # point forecast + intervals for next month
+    log("intervals: start")
     point_y, point_log = forecast_next_month(df, cfg, robust, chosen_name, all_metrics)
     intervals = bootstrap_intervals_log1p(errors_log, point_log, cfg.bootstrap_n, cfg.seed)
     _ = point_y
+    log("intervals: ok")
 
     next_month = df["month"].max() + pd.offsets.MonthBegin(1)
 
     metrics_df = pd.DataFrame(all_metrics).T.sort_values("MAE")
 
+    log("done")
     return ForecastResult(
         rows_in=len(df0),
         rows_after_fill=len(df1),
@@ -155,6 +175,13 @@ def run_forecast(raw: str, cfg: ForecastConfig = ForecastConfig()) -> ForecastRe
 
 
 def format_result_text(res: ForecastResult) -> str:
+    def as_df(value: object) -> pd.DataFrame:
+        if isinstance(value, pd.DataFrame):
+            return value
+        if isinstance(value, dict):
+            return pd.DataFrame([value])
+        return pd.DataFrame(value)
+
     parts = []
     parts.append("=== DATA ===")
     parts.append(
@@ -164,7 +191,7 @@ def format_result_text(res: ForecastResult) -> str:
     parts.append("")
 
     parts.append("=== METRICS ===")
-    parts.append(res.metrics.to_string())
+    parts.append(as_df(res.metrics).to_string())
     parts.append("")
 
     parts.append("=== CHOSEN_FORECAST_FOR_REPORTING ===")
@@ -172,12 +199,12 @@ def format_result_text(res: ForecastResult) -> str:
     parts.append("")
 
     parts.append("=== BACKTEST_TABLE ===")
-    parts.append(res.backtest.to_string(index=False))
+    parts.append(as_df(res.backtest).to_string(index=False))
     parts.append("")
 
     parts.append("=== FINAL_FORECAST_NEXT_MONTH ===")
     parts.append(f"next_month={res.next_month}")
-    parts.append(res.intervals.to_string(index=False))
+    parts.append(as_df(res.intervals).to_string(index=False))
     parts.append("")
 
     return "\n".join(parts)
