@@ -52,7 +52,12 @@ def forecast_next_month(
     robust: bool,
     chosen_name: str,
     metrics: dict,
+    on_log: Optional[Callable[[str], None]] = None,
 ) -> tuple[float, float]:
+    def log(msg: str) -> None:
+        if on_log is not None:
+            on_log(msg)
+
     y_full = df["y"].to_numpy(float)
     ylog_full = df["y_log"].to_numpy(float)
     ylog_train = (
@@ -94,9 +99,11 @@ def forecast_next_month(
         full_y[name] = value
 
     # TBATS (y)
-    tb = tbats_forecast_y(y_full, cfg.tbats_seasonal_periods, cfg.tbats_min_n)
+    tb, tb_err = tbats_forecast_y(y_full, cfg.tbats_seasonal_periods, cfg.tbats_min_n)
     if tb is not None:
         full_y["TBATS_y"] = tb
+    elif HAS_SKTIME and len(y_full) >= cfg.tbats_min_n:
+        log(f"sktime.tbats: failed ({tb_err})")
 
     # chosen point forecast
     if chosen_name == "Ensemble_top3_weighted":
@@ -179,7 +186,7 @@ def run_forecast(
 
     # point forecast + intervals for next month
     log("intervals: start")
-    point_y, point_log = forecast_next_month(df, cfg, robust, chosen_name, all_metrics)
+    point_y, point_log = forecast_next_month(df, cfg, robust, chosen_name, all_metrics, on_log=log)
     intervals = bootstrap_intervals_log1p(errors_log, point_log, cfg.bootstrap_n, cfg.seed)
     _ = point_y
     log("intervals: ok")

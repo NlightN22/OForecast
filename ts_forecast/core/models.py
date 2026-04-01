@@ -168,19 +168,19 @@ def tbats_forecast_y(
     y_train: np.ndarray,
     seasonal_periods: int,
     min_n: int,
-) -> Optional[float]:
+) -> tuple[Optional[float], Optional[str]]:
     if not HAS_SKTIME:
-        return None
+        return None, "sktime not available"
     if len(y_train) < min_n:
-        return None
+        return None, f"n<{min_n}"
     try:
         series = pd.Series(y_train)
-        forecaster = TBATS(seasonal_periods=[seasonal_periods])
+        forecaster = TBATS(sp=[seasonal_periods])
         forecaster.fit(series)
         pred = forecaster.predict(fh=[1])
-        return float(pred.iloc[0])
-    except Exception:
-        return None
+        return float(pred.iloc[0]), None
+    except Exception as exc:
+        return None, str(exc)
 
 
 def available_model_names(
