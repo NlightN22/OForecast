@@ -49,12 +49,15 @@ form.addEventListener("submit", async (e) => {
     const parts = buffer.split("\\n\\n");
     buffer = parts.pop();
     for (const part of parts) {
-      const line = part.trim();
-      if (!line) continue;
-      const msg = line.replace(/^data:\\s?/, "");
-      if (msg === "[done]") continue;
-      log.textContent += msg + "\\n";
-      log.scrollTop = log.scrollHeight;
+      const lines = part.split("\\n");
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        let msg = line.slice(5);
+        if (msg.startsWith(" ")) msg = msg.slice(1);
+        if (msg === "[done]") continue;
+        log.textContent += msg + "\\n";
+        log.scrollTop = log.scrollHeight;
+      }
     }
   }
 });

@@ -175,12 +175,44 @@ def run_forecast(
 
 
 def format_result_text(res: ForecastResult) -> str:
+    def format_number(value: object) -> object:
+        if isinstance(value, (int, float, np.floating)) and not isinstance(value, bool):
+            if isinstance(value, float) and (np.isnan(value) or np.isinf(value)):
+                return value
+            return f"{value:,.2f}".replace(",", " ")
+        return value
+
     def as_df(value: object) -> pd.DataFrame:
         if isinstance(value, pd.DataFrame):
-            return value
-        if isinstance(value, dict):
-            return pd.DataFrame([value])
-        return pd.DataFrame(value)
+            df = value.copy()
+        elif isinstance(value, dict):
+            df = pd.DataFrame([value])
+        else:
+            df = pd.DataFrame(value)
+        for col in df.columns:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                df[col] = df[col].map(format_number)
+        return df
+
+    def format_table(value: object, index: bool = False) -> str:
+        df = as_df(value).copy()
+        if index:
+            idx_name = df.index.name or "index"
+            df.insert(0, idx_name, df.index.astype(str))
+
+        cols = [str(c) for c in df.columns]
+        rows = [[str(v) for v in row] for row in df.to_numpy()]
+        widths = [len(c) for c in cols]
+        for row in rows:
+            for i, cell in enumerate(row):
+                widths[i] = max(widths[i], len(cell))
+
+        header = " | ".join(c.ljust(widths[i]) for i, c in enumerate(cols))
+        sep = "-+-".join("-" * widths[i] for i in range(len(widths)))
+        lines = [header, sep]
+        for row in rows:
+            lines.append(" | ".join(row[i].rjust(widths[i]) for i in range(len(widths))))
+        return "\n".join(lines)
 
     parts = []
     parts.append("=== DATA ===")
@@ -191,7 +223,7 @@ def format_result_text(res: ForecastResult) -> str:
     parts.append("")
 
     parts.append("=== METRICS ===")
-    parts.append(as_df(res.metrics).to_string())
+    parts.append(format_table(res.metrics, index=True))
     parts.append("")
 
     parts.append("=== CHOSEN_FORECAST_FOR_REPORTING ===")
@@ -199,12 +231,12 @@ def format_result_text(res: ForecastResult) -> str:
     parts.append("")
 
     parts.append("=== BACKTEST_TABLE ===")
-    parts.append(as_df(res.backtest).to_string(index=False))
+    parts.append(format_table(res.backtest, index=False))
     parts.append("")
 
     parts.append("=== FINAL_FORECAST_NEXT_MONTH ===")
     parts.append(f"next_month={res.next_month}")
-    parts.append(as_df(res.intervals).to_string(index=False))
+    parts.append(format_table(res.intervals, index=False))
     parts.append("")
 
     return "\n".join(parts)
