@@ -21,6 +21,8 @@ from .models import (
     HAS_PMDARIMA,
     HAS_STATSFORECAST,
     statsforecast_one_step,
+    HAS_SKTIME,
+    tbats_forecast_y,
 )
 
 
@@ -91,6 +93,11 @@ def forecast_next_month(
     for name, value in sf.items():
         full_y[name] = value
 
+    # TBATS (y)
+    tb = tbats_forecast_y(y_full, cfg.tbats_seasonal_periods, cfg.tbats_min_n)
+    if tb is not None:
+        full_y["TBATS_y"] = tb
+
     # chosen point forecast
     if chosen_name == "Ensemble_top3_weighted":
         ranked = sorted(
@@ -140,6 +147,18 @@ def run_forecast(
     log("backtest: start")
     if not HAS_STATSFORECAST:
         log("statsforecast: unavailable (optional)")
+    else:
+        if len(df) < 3:
+            log("statsforecast: skipped (n<3)")
+        else:
+            mstl_min_n = max(2 * cfg.statsforecast_seasonal_length, cfg.statsforecast_seasonal_length + 1)
+            if len(df) < mstl_min_n:
+                log(f"statsforecast: MSTL skipped (n<{mstl_min_n})")
+    if not HAS_SKTIME:
+        log("sktime.tbats: unavailable (optional)")
+    else:
+        if len(df) < cfg.tbats_min_n:
+            log(f"sktime.tbats: skipped (n<{cfg.tbats_min_n})")
     ds_name, bt = choose_dataset(df, cfg)
     robust = ds_name != "A_raw"
     log(f"backtest: chosen_dataset={ds_name}")

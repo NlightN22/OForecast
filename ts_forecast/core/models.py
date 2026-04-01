@@ -22,6 +22,13 @@ try:
 except Exception:
     HAS_STATSFORECAST = False
 
+try:
+    from sktime.forecasting.tbats import TBATS
+
+    HAS_SKTIME = True
+except Exception:
+    HAS_SKTIME = False
+
 
 @dataclass(frozen=True)
 class ModelSpec:
@@ -155,6 +162,25 @@ def statsforecast_one_step(
         except Exception:
             continue
     return out
+
+
+def tbats_forecast_y(
+    y_train: np.ndarray,
+    seasonal_periods: int,
+    min_n: int,
+) -> Optional[float]:
+    if not HAS_SKTIME:
+        return None
+    if len(y_train) < min_n:
+        return None
+    try:
+        series = pd.Series(y_train)
+        forecaster = TBATS(seasonal_periods=[seasonal_periods])
+        forecaster.fit(series)
+        pred = forecaster.predict(fh=[1])
+        return float(pred.iloc[0])
+    except Exception:
+        return None
 
 
 def available_model_names(

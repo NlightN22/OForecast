@@ -31,3 +31,7 @@ class ForecastConfig:
 
     # StatsForecast
     statsforecast_seasonal_length: int = 12
+
+    # TBATS (sktime)
+    tbats_seasonal_periods: int = 12
+    tbats_min_n: int = 24

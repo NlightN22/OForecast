@@ -15,6 +15,7 @@ from .models import (
     arima_forecast_log,
     HAS_PMDARIMA,
     statsforecast_one_step,
+    tbats_forecast_y,
 )
 
 @dataclass
@@ -77,6 +78,11 @@ def walk_forward(df: pd.DataFrame, cfg: ForecastConfig, robust: bool, include_ar
         sf = statsforecast_one_step(train["month"], y_train, cfg.statsforecast_seasonal_length)
         for name, value in sf.items():
             preds.setdefault(name, []).append(value)
+
+        # TBATS (y)
+        tb = tbats_forecast_y(y_train, cfg.tbats_seasonal_periods, cfg.tbats_min_n)
+        if tb is not None:
+            preds.setdefault("TBATS_y", []).append(tb)
 
         months.append(df.loc[i, "month"])
         actual.append(float(df.loc[i, "y"]))
