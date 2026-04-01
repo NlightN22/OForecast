@@ -1,0 +1,183 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+import pandas as pd
+
+from .config import ForecastConfig
+from ..io.parsing import read_tsv_like, fill_missing_months, add_transforms
+from .backtest import choose_dataset
+from .ensemble import build_ensemble_or_best
+from .intervals import bootstrap_intervals_log1p
+from .models import (
+    winsorize_log,
+    safe_expm1,
+    ses_forecast_log,
+    ets_forecast_log,
+    seasonal_naive_y,
+    arima_forecast_log,
+    HAS_PMDARIMA,
+)
+
+
+def format_month(ts: pd.Timestamp) -> str:
+    return ts.strftime("%Y-%m")
+
+
+def backtest_table(months, actual, forecast) -> pd.DataFrame:
+    err = forecast - actual
+    abs_err = np.abs(err)
+    ape = np.where(actual > 0, 100.0 * abs_err / actual, np.nan)
+    return pd.DataFrame(
+        {
+            "month": [format_month(m) for m in months],
+            "actual": actual,
+            "forecast": forecast,
+            "error": err,
+            "abs_error": abs_err,
+            "ape%": ape,
+        }
+    )
+
+
+def forecast_next_month(
+    df: pd.DataFrame,
+    cfg: ForecastConfig,
+    robust: bool,
+    chosen_name: str,
+    metrics: dict,
+) -> tuple[float, float]:
+    y_full = df["y"].to_numpy(float)
+    ylog_full = df["y_log"].to_numpy(float)
+    ylog_train = (
+        winsorize_log(ylog_full, cfg.winsor_q_low, cfg.winsor_q_high)
+        if robust
+        else ylog_full
+    )
+
+    # produce single-step forecasts for all models (needed for ensemble)
+    full_y = {}
+
+    # SES
+    full_y["SES_log"] = safe_expm1(ses_forecast_log(ylog_train))
+
+    # ETS grid
+    use_seasonal = len(ylog_train) >= cfg.ets_seasonal_min_n
+    for tr in cfg.ets_trends:
+        for seas in cfg.ets_seasonals:
+            if seas is not None and not use_seasonal:
+                continue
+            sp = cfg.ets_seasonal_periods if seas is not None else None
+            name = f"ETS_log_trend={tr}_seasonal={seas}"
+            full_y[name] = safe_expm1(ets_forecast_log(ylog_train, tr, seas, sp))
+
+    # Seasonal naive
+    full_y["SeasonalNaive_y"] = seasonal_naive_y(y_full)
+
+    # ARIMA
+    if HAS_PMDARIMA:
+        a = arima_forecast_log(
+            ylog_train, cfg.arima_m, cfg.arima_stepwise, cfg.arima_max_pq, cfg.arima_max_pq_seas
+        )
+        if a is not None:
+            full_y["AutoARIMA_log"] = safe_expm1(a)
+
+    # chosen point forecast
+    if chosen_name == "Ensemble_top3_weighted":
+        ranked = sorted(
+            ((m, metrics[m]["MAE"]) for m in metrics.keys() if m != "Ensemble_top3_weighted"),
+            key=lambda x: x[1],
+        )
+        top = [m for m, _ in ranked[: cfg.ensemble_topk]]
+        w = np.array([1.0 / max(metrics[m]["MAE"], 1e-9) for m in top], float)
+        w = w / w.sum()
+        point = float(sum(wi * full_y[m] for wi, m in zip(w, top)))
+    else:
+        point = float(full_y[chosen_name])
+
+    return point, float(np.log1p(max(point, 0.0)))
+
+
+@dataclass(frozen=True)
+class ForecastResult:
+    rows_in: int
+    rows_after_fill: int
+    missing_months_filled: int
+    chosen_dataset: str
+    chosen_model: str
+    metrics: pd.DataFrame
+    backtest: pd.DataFrame
+    next_month: str
+    intervals: pd.DataFrame
+
+
+def run_forecast(raw: str, cfg: ForecastConfig = ForecastConfig()) -> ForecastResult:
+    df0 = read_tsv_like(raw)
+    df1, miss_n = fill_missing_months(df0)
+    df = add_transforms(df1)
+
+    ds_name, bt = choose_dataset(df, cfg)
+    robust = ds_name != "A_raw"
+
+    chosen_name, chosen_bt_forecast, all_metrics = build_ensemble_or_best(
+        actual_y=bt.actual_y,
+        preds_y=bt.preds_y,
+        topk=cfg.ensemble_topk,
+        max_degradation=cfg.ensemble_max_degradation,
+    )
+
+    bt_df = backtest_table(bt.months, bt.actual_y, chosen_bt_forecast)
+
+    # errors in log1p space for bootstrap intervals
+    errors_log = np.log1p(bt.actual_y) - np.log1p(np.maximum(chosen_bt_forecast, 0.0) + 1e-9)
+
+    # point forecast + intervals for next month
+    point_y, point_log = forecast_next_month(df, cfg, robust, chosen_name, all_metrics)
+    intervals = bootstrap_intervals_log1p(errors_log, point_log, cfg.bootstrap_n, cfg.seed)
+    _ = point_y
+
+    next_month = df["month"].max() + pd.offsets.MonthBegin(1)
+
+    metrics_df = pd.DataFrame(all_metrics).T.sort_values("MAE")
+
+    return ForecastResult(
+        rows_in=len(df0),
+        rows_after_fill=len(df1),
+        missing_months_filled=miss_n,
+        chosen_dataset=ds_name,
+        chosen_model=chosen_name,
+        metrics=metrics_df,
+        backtest=bt_df,
+        next_month=format_month(next_month),
+        intervals=intervals,
+    )
+
+
+def format_result_text(res: ForecastResult) -> str:
+    parts = []
+    parts.append("=== DATA ===")
+    parts.append(
+        f"rows_in={res.rows_in} rows_after_fill={res.rows_after_fill} missing_months_filled={res.missing_months_filled}"
+    )
+    parts.append(f"chosen_dataset={res.chosen_dataset}")
+    parts.append("")
+
+    parts.append("=== METRICS ===")
+    parts.append(res.metrics.to_string())
+    parts.append("")
+
+    parts.append("=== CHOSEN_FORECAST_FOR_REPORTING ===")
+    parts.append(res.chosen_model)
+    parts.append("")
+
+    parts.append("=== BACKTEST_TABLE ===")
+    parts.append(res.backtest.to_string(index=False))
+    parts.append("")
+
+    parts.append("=== FINAL_FORECAST_NEXT_MONTH ===")
+    parts.append(f"next_month={res.next_month}")
+    parts.append(res.intervals.to_string(index=False))
+    parts.append("")
+
+    return "\n".join(parts)
