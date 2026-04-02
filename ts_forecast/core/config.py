@@ -35,3 +35,6 @@ class ForecastConfig:
     # TBATS (sktime)
     tbats_seasonal_periods: int = 12
     tbats_min_n: int = 24
+
+    # Input limits
+    max_rows: int = 84

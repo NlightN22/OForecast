@@ -162,19 +162,28 @@ def run_forecast(
     models: Optional[list[str]] = None,
     use_all: bool = True,
     fill_missing_with_mean: bool = False,
+    should_abort: Optional[Callable[[], bool]] = None,
 ) -> ForecastResult:
     def log(msg: str) -> None:
         if on_log is not None:
             on_log(msg)
 
+    def check_abort() -> None:
+        if should_abort is not None and should_abort():
+            raise RuntimeError("aborted")
+
+    check_abort()
     log("parse: start")
     df0 = read_tsv_like(raw)
     log(f"parse: ok rows={len(df0)}")
+    if len(df0) > cfg.max_rows:
+        raise ValueError(f"too many rows: {len(df0)} (max {cfg.max_rows})")
     df1, miss_n = fill_missing_months(df0, fill_missing_with_mean)
     mode = "interpolate" if fill_missing_with_mean else "zero"
     log(f"fill_missing_months: mode={mode} missing={miss_n} rows_after_fill={len(df1)}")
     df = add_transforms(df1)
     log("transforms: ok")
+    check_abort()
 
     all_models = set(model_catalog(cfg.ets_trends, cfg.ets_seasonals))
     if use_all or not models:
@@ -221,9 +230,16 @@ def run_forecast(
     else:
         if len(df) < cfg.tbats_min_n:
             log(f"sktime.tbats: skipped (n<{cfg.tbats_min_n})")
-    ds_name, bt = choose_dataset(df, cfg, allowed_models=allowed_models, on_log=log)
+    ds_name, bt = choose_dataset(
+        df,
+        cfg,
+        allowed_models=allowed_models,
+        on_log=log,
+        should_abort=should_abort,
+    )
     robust = ds_name != "A_raw"
     log(f"backtest: chosen_dataset={ds_name}")
+    check_abort()
 
     log("ensemble: start")
     chosen_name, chosen_bt_forecast, all_metrics = build_ensemble_or_best(
@@ -233,6 +249,7 @@ def run_forecast(
         max_degradation=cfg.ensemble_max_degradation,
     )
     log(f"ensemble: chosen_model={chosen_name}")
+    check_abort()
     ensemble_models = []
     if "Ensemble_top3_weighted" in all_metrics:
         ensemble_models = ensemble_top_models(all_metrics, cfg.ensemble_topk)
@@ -256,6 +273,7 @@ def run_forecast(
     intervals = bootstrap_intervals_log1p(errors_log, point_log, cfg.bootstrap_n, cfg.seed)
     _ = point_y
     log("intervals: ok")
+    check_abort()
 
     next_month = df["month"].max() + pd.offsets.MonthBegin(1)
 

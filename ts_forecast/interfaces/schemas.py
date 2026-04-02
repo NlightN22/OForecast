@@ -19,6 +19,10 @@ class ForecastRequest(BaseModel):
         default=False,
         description="Fill missing months by interpolation; when false, missing months use 0",
     )
+    run_id: str | None = Field(
+        default=None,
+        description="Optional client run id for cancellation tracking",
+    )
 
 
 class ForecastResponse(BaseModel):

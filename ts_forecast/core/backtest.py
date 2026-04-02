@@ -38,6 +38,7 @@ def walk_forward(
     include_arima: bool = True,
     allowed_models: Optional[set[str]] = None,
     on_log: Optional[Callable[[str], None]] = None,
+    should_abort: Optional[Callable[[], bool]] = None,
 ) -> BacktestResult:
     n = len(df)
     tlen = _test_len(n, cfg)
@@ -51,6 +52,8 @@ def walk_forward(
     tbats_err: Optional[str] = None
 
     for i in range(start, n):
+        if should_abort is not None and should_abort():
+            raise RuntimeError("aborted")
         if on_log is not None and (i == start or (i - start) % 2 == 0):
             on_log(f"backtest: step {i - start + 1}/{tlen} (train={i})")
         train = df.iloc[:i]
@@ -144,6 +147,7 @@ def choose_dataset(
     cfg: ForecastConfig,
     allowed_models: Optional[set[str]] = None,
     on_log: Optional[Callable[[str], None]] = None,
+    should_abort: Optional[Callable[[], bool]] = None,
 ) -> tuple[str, BacktestResult]:
     bt_a = walk_forward(
         df,
@@ -152,6 +156,7 @@ def choose_dataset(
         include_arima=True,
         allowed_models=allowed_models,
         on_log=on_log,
+        should_abort=should_abort,
     )
     bt_b = walk_forward(
         df,
@@ -160,6 +165,7 @@ def choose_dataset(
         include_arima=True,
         allowed_models=allowed_models,
         on_log=on_log,
+        should_abort=should_abort,
     )
 
     if not bt_a.preds_y and not bt_b.preds_y:
