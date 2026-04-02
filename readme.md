@@ -1,11 +1,19 @@
 # OForecast
 
+## Quick start (Docker Compose)
+```bash
+docker compose up -d
+```
+Then open http://localhost:8000.
+
+## Overview
 OForecast is a small FastAPI service and CLI tool for time series forecasting.
 
 ## Features
 - HTTP API for forecasts via FastAPI.
 - CLI mode for local runs.
 - Models based on statsforecast, sktime, tbats, and scikit-learn.
+- Optional filling of missing months by interpolation (default is 0 for gaps).
 
 ## Run the API
 ```bash
