@@ -18,3 +18,4 @@ tests/
 .vscode/
 .idea/
 *.log
+build_and_push.ps1
