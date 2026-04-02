@@ -56,11 +56,15 @@ pre {{ white-space: pre-wrap; background: #f6f6f6; padding: 12px; border: 1px so
   </div>
   <br><button id="run-btn" type="submit">Run forecast</button>
 </form>
-<h2>Progress</h2>
+<div style="display: flex; align-items: center; gap: 12px;">
+  <h2 style="margin: 0;">Progress</h2>
+  <button id="copy-log" type="button">Copy output</button>
+</div>
 <pre id="log"></pre>
 <script>
 const form = document.getElementById("forecast-form");
 const log = document.getElementById("log");
+const copyBtn = document.getElementById("copy-log");
 const rawInput = document.getElementById("raw");
 const modelsSelect = document.getElementById("models");
 const useAll = document.getElementById("use_all");
@@ -105,6 +109,23 @@ form.addEventListener("submit", async (e) => {{
         log.scrollTop = log.scrollHeight;
       }}
     }}
+  }}
+}});
+copyBtn.addEventListener("click", async () => {{
+  const text = log.textContent.trim();
+  if (!text) return;
+  try {{
+    await navigator.clipboard.writeText(text);
+  }} catch (err) {{
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "absolute";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    document.body.removeChild(area);
   }}
 }});
 </script>
