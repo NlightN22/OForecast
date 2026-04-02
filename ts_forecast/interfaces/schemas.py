@@ -15,6 +15,10 @@ class ForecastRequest(BaseModel):
         default=True,
         description="Use all available models (ignores models list when true)",
     )
+    fill_missing_with_mean: bool = Field(
+        default=False,
+        description="Fill missing months by interpolation; when false, missing months use 0",
+    )
 
 
 class ForecastResponse(BaseModel):

@@ -36,14 +36,17 @@ def read_tsv_like(raw: str) -> pd.DataFrame:
     df = pd.DataFrame(rows, columns=["month", "value"]).sort_values("month").reset_index(drop=True)
     return df
 
-def fill_missing_months(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+def fill_missing_months(df: pd.DataFrame, fill_with_mean: bool) -> tuple[pd.DataFrame, int]:
     full = pd.date_range(df["month"].min(), df["month"].max(), freq="MS")
     missing = full.difference(pd.DatetimeIndex(df["month"]))
     miss_n = len(missing)
     if miss_n == 0:
         return df.copy(), 0
     out = df.set_index("month").reindex(full).rename_axis("month").reset_index()
-    out["value"] = out["value"].interpolate("linear")
+    if fill_with_mean:
+        out["value"] = out["value"].interpolate("linear")
+    else:
+        out["value"] = out["value"].fillna(0.0)
     return out, miss_n
 
 def add_transforms(df: pd.DataFrame) -> pd.DataFrame:

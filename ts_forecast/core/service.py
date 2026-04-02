@@ -48,6 +48,14 @@ def backtest_table(months, actual, forecast) -> pd.DataFrame:
     )
 
 
+def ensemble_top_models(metrics: dict, topk: int) -> list[str]:
+    ranked = sorted(
+        ((m, v["MAE"]) for m, v in metrics.items() if m != "Ensemble_top3_weighted"),
+        key=lambda x: x[1],
+    )
+    return [m for m, _ in ranked[:topk]]
+
+
 def forecast_next_month(
     df: pd.DataFrame,
     cfg: ForecastConfig,
@@ -140,6 +148,7 @@ class ForecastResult:
     missing_months_filled: int
     chosen_dataset: str
     chosen_model: str
+    ensemble_models: list[str]
     metrics: pd.DataFrame
     backtest: pd.DataFrame
     next_month: str
@@ -152,6 +161,7 @@ def run_forecast(
     on_log: Optional[Callable[[str], None]] = None,
     models: Optional[list[str]] = None,
     use_all: bool = True,
+    fill_missing_with_mean: bool = False,
 ) -> ForecastResult:
     def log(msg: str) -> None:
         if on_log is not None:
@@ -160,8 +170,9 @@ def run_forecast(
     log("parse: start")
     df0 = read_tsv_like(raw)
     log(f"parse: ok rows={len(df0)}")
-    df1, miss_n = fill_missing_months(df0)
-    log(f"fill_missing_months: missing={miss_n} rows_after_fill={len(df1)}")
+    df1, miss_n = fill_missing_months(df0, fill_missing_with_mean)
+    mode = "interpolate" if fill_missing_with_mean else "zero"
+    log(f"fill_missing_months: mode={mode} missing={miss_n} rows_after_fill={len(df1)}")
     df = add_transforms(df1)
     log("transforms: ok")
 
@@ -222,6 +233,9 @@ def run_forecast(
         max_degradation=cfg.ensemble_max_degradation,
     )
     log(f"ensemble: chosen_model={chosen_name}")
+    ensemble_models = []
+    if "Ensemble_top3_weighted" in all_metrics:
+        ensemble_models = ensemble_top_models(all_metrics, cfg.ensemble_topk)
 
     bt_df = backtest_table(bt.months, bt.actual_y, chosen_bt_forecast)
 
@@ -254,6 +268,7 @@ def run_forecast(
         missing_months_filled=miss_n,
         chosen_dataset=ds_name,
         chosen_model=chosen_name,
+        ensemble_models=ensemble_models,
         metrics=metrics_df,
         backtest=bt_df,
         next_month=format_month(next_month),
@@ -314,7 +329,10 @@ def format_result_text(res: ForecastResult) -> str:
     parts.append("")
 
     parts.append("=== CHOSEN_FORECAST_FOR_REPORTING ===")
-    parts.append(res.chosen_model)
+    if res.chosen_model == "Ensemble_top3_weighted" and res.ensemble_models:
+        parts.append(f"{res.chosen_model} (models: {', '.join(res.ensemble_models)})")
+    else:
+        parts.append(res.chosen_model)
     parts.append("")
 
     parts.append("=== BACKTEST_TABLE ===")

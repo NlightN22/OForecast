@@ -18,7 +18,11 @@ CFG = ForecastConfig()
 MODEL_OPTIONS = model_catalog(CFG.ets_trends, CFG.ets_seasonals)
 
 
-def render_form(selected_models: list[str] | None = None, use_all: bool = True) -> str:
+def render_form(
+    selected_models: list[str] | None = None,
+    use_all: bool = True,
+    fill_missing_with_mean: bool = False,
+) -> str:
     selected = set(selected_models or [])
     options_html = "\n".join(
         f'<option value="{html.escape(name)}"{" selected" if (use_all or name in selected) else ""}>'
@@ -26,6 +30,7 @@ def render_form(selected_models: list[str] | None = None, use_all: bool = True) 
         for name in MODEL_OPTIONS
     )
     use_all_checked = " checked" if use_all else ""
+    fill_checked = " checked" if fill_missing_with_mean else ""
     return f"""<!doctype html>
 <meta charset="utf-8">
 <title>OForecast</title>
@@ -38,6 +43,9 @@ pre {{ white-space: pre-wrap; background: #f6f6f6; padding: 12px; border: 1px so
 <h1>OForecast</h1>
 <form id="forecast-form" method="post" action="/forecast/form">
   <textarea id="raw" name="raw" placeholder="Paste data here (same format as data.txt)"></textarea>
+  <div>
+    <label><input type="checkbox" id="fill_missing_with_mean" name="fill_missing_with_mean"{fill_checked}> Fill missing months by interpolation</label>
+  </div>
   <div>
     <label><input type="checkbox" id="use_all" name="use_all"{use_all_checked}> Use all models</label>
   </div>
@@ -56,6 +64,7 @@ const log = document.getElementById("log");
 const rawInput = document.getElementById("raw");
 const modelsSelect = document.getElementById("models");
 const useAll = document.getElementById("use_all");
+const fillMissing = document.getElementById("fill_missing_with_mean");
 const syncModels = () => {{
   modelsSelect.disabled = useAll.checked;
 }};
@@ -68,7 +77,8 @@ form.addEventListener("submit", async (e) => {{
   const payload = {{
     raw: rawInput.value,
     models: selected,
-    use_all: useAll.checked
+    use_all: useAll.checked,
+    fill_missing_with_mean: fillMissing.checked
   }};
   const resp = await fetch("/forecast/stream", {{
     method: "POST",
@@ -108,7 +118,12 @@ def index() -> str:
 
 @app.post("/forecast", response_model=ForecastResponse)
 def forecast_json(payload: ForecastRequest) -> ForecastResponse:
-    res = run_forecast(payload.raw, models=payload.models, use_all=payload.use_all)
+    res = run_forecast(
+        payload.raw,
+        models=payload.models,
+        use_all=payload.use_all,
+        fill_missing_with_mean=payload.fill_missing_with_mean,
+    )
     return ForecastResponse(
         rows_in=res.rows_in,
         rows_after_fill=res.rows_after_fill,
@@ -134,10 +149,23 @@ def forecast_form(
     raw: str = Form(...),
     models: list[str] = Form(default=[]),
     use_all: bool = Form(False),
+    fill_missing_with_mean: bool = Form(False),
 ) -> str:
-    res = run_forecast(raw, models=models, use_all=use_all)
+    res = run_forecast(
+        raw,
+        models=models,
+        use_all=use_all,
+        fill_missing_with_mean=fill_missing_with_mean,
+    )
     text = html.escape(format_result_text(res))
-    return render_form(selected_models=models, use_all=use_all) + f"<h2>Result</h2><pre>{text}</pre>"
+    return (
+        render_form(
+            selected_models=models,
+            use_all=use_all,
+            fill_missing_with_mean=fill_missing_with_mean,
+        )
+        + f"<h2>Result</h2><pre>{text}</pre>"
+    )
 
 
 @app.post("/forecast/stream")
@@ -155,6 +183,7 @@ def forecast_stream(payload: ForecastRequest) -> StreamingResponse:
                 on_log=on_log,
                 models=payload.models,
                 use_all=payload.use_all,
+                fill_missing_with_mean=payload.fill_missing_with_mean,
             )
             q.put(("result", format_result_text(res)))
         except Exception as exc:
