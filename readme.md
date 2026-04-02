@@ -2,9 +2,10 @@
 
 ## Quick start (Docker Compose)
 ```bash
+wget https://github.com/NlightN22/OForecast/raw/refs/heads/main/docker-compose.yml
 docker compose up -d
 ```
-Then open http://localhost:8000.
+Then open http://localhost:80.
 
 ## Overview
 OForecast is a small FastAPI service and CLI tool for time series forecasting.
