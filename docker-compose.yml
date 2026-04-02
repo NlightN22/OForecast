@@ -3,3 +3,8 @@ services:
     image: oncharterliz/oforecast:0.1.0
     ports:
       - "80:8000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
