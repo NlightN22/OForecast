@@ -7,3 +7,4 @@ sktime>=0.28
 tbats
 scikit-learn<1.6
 numpy<2
+dateparser

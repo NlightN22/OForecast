@@ -135,6 +135,18 @@ def walk_forward(
             )
 
     preds_np = {k: np.asarray(v, dtype=float) for k, v in preds.items()}
+    expected_len = len(actual)
+    if preds_np:
+        filtered: Dict[str, np.ndarray] = {}
+        for name, values in preds_np.items():
+            if len(values) != expected_len:
+                diagnostics.setdefault(
+                    name,
+                    f"dropped: preds_len={len(values)} expected={expected_len}",
+                )
+                continue
+            filtered[name] = values
+        preds_np = filtered
     return BacktestResult(
         months=months,
         actual_y=np.asarray(actual, dtype=float),
