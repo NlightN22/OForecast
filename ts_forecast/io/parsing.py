@@ -62,13 +62,15 @@ def parse_ru_number(s: str) -> float:
 
 def read_tsv_like(raw: str) -> pd.DataFrame:
     rows = []
-    sep_re = re.compile(r"(?:\t+| {2,})")
+    sep_re = re.compile(r"\s*(?:\t+| {2,}|[;|])\s*")
     for line in raw.splitlines():
         if not line.strip():
             continue
         parts = sep_re.split(line.strip(), maxsplit=1)
         if len(parts) != 2:
-            raise ValueError(f"Line must contain tab or 2+ spaces separator: {line}")
+            raise ValueError(
+                f"Line must contain tab, 2+ spaces, ';' or '|' separator: {line}"
+            )
         m_str, v_str = parts
         rows.append((parse_ru_month_year(m_str), parse_ru_number(v_str)))
     df = pd.DataFrame(rows, columns=["month", "value"]).sort_values("month").reset_index(drop=True)
