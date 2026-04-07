@@ -1,6 +1,6 @@
 services:
   web:
-    image: oncharterliz/oforecast:0.1.1
+    image: oncharterliz/oforecast:latest
     ports:
       - "80:8000"
     logging:
