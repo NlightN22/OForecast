@@ -1,16 +1,27 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
 
 from .config import ForecastConfig
-from ..io.parsing import read_tsv_like, fill_missing_months, add_transforms
+from ..io.parsing import (
+    add_transforms,
+    fill_missing_periods,
+    infer_period_freq,
+    period_seasonal_length,
+    read_tsv_like,
+)
 from .backtest import choose_dataset
 from .ensemble import build_ensemble_or_best
 from .intervals import bootstrap_intervals_log1p
+from .result import (
+    ForecastResult,
+    backtest_table,
+    ensemble_top_models,
+    format_result_text,
+)
 from .models import (
     winsorize_log,
     safe_expm1,
@@ -28,35 +39,17 @@ from .models import (
 )
 
 
-def format_month(ts: pd.Timestamp) -> str:
-    return ts.strftime("%Y-%m")
+def next_period_label(df: pd.DataFrame) -> str:
+    if "next_label" in df.columns and not df["next_label"].empty:
+        return str(df["next_label"].iloc[-1])
+    period_freq = infer_period_freq(df)
+    if period_freq is None:
+        return "next"
+    next_start = pd.date_range(df["period_start"].max(), periods=2, freq=period_freq)[-1]
+    return next_start.strftime("%Y-%m")
 
 
-def backtest_table(months, actual, forecast) -> pd.DataFrame:
-    err = forecast - actual
-    abs_err = np.abs(err)
-    ape = np.where(actual > 0, 100.0 * abs_err / actual, np.nan)
-    return pd.DataFrame(
-        {
-            "month": [format_month(m) for m in months],
-            "actual": actual,
-            "forecast": forecast,
-            "error": err,
-            "abs_error": abs_err,
-            "ape%": ape,
-        }
-    )
-
-
-def ensemble_top_models(metrics: dict, topk: int) -> list[str]:
-    ranked = sorted(
-        ((m, v["MAE"]) for m, v in metrics.items() if m != "Ensemble_top3_weighted"),
-        key=lambda x: x[1],
-    )
-    return [m for m, _ in ranked[:topk]]
-
-
-def forecast_next_month(
+def forecast_next_period(
     df: pd.DataFrame,
     cfg: ForecastConfig,
     robust: bool,
@@ -71,6 +64,9 @@ def forecast_next_month(
 
     y_full = df["y"].to_numpy(float)
     ylog_full = df["y_log"].to_numpy(float)
+    log_shift = float(df["log_shift"].iloc[-1])
+    period_freq = infer_period_freq(df)
+    seasonal_length = period_seasonal_length(df)
     ylog_train = (
         winsorize_log(ylog_full, cfg.winsor_q_low, cfg.winsor_q_high)
         if robust
@@ -82,7 +78,7 @@ def forecast_next_month(
 
     # SES
     if should_use_model(allowed_models, "SES_log"):
-        full_y["SES_log"] = safe_expm1(ses_forecast_log(ylog_train))
+        full_y["SES_log"] = safe_expm1(ses_forecast_log(ylog_train), log_shift)
 
     # ETS grid
     use_seasonal = len(ylog_train) >= cfg.ets_seasonal_min_n
@@ -93,25 +89,30 @@ def forecast_next_month(
             sp = cfg.ets_seasonal_periods if seas is not None else None
             name = f"ETS_log_trend={tr}_seasonal={seas}"
             if should_use_model(allowed_models, name):
-                full_y[name] = safe_expm1(ets_forecast_log(ylog_train, tr, seas, sp))
+                full_y[name] = safe_expm1(ets_forecast_log(ylog_train, tr, seas, sp), log_shift)
 
     # Seasonal naive
     if should_use_model(allowed_models, "SeasonalNaive_y"):
-        full_y["SeasonalNaive_y"] = seasonal_naive_y(y_full)
+        full_y["SeasonalNaive_y"] = seasonal_naive_y(y_full, seasonal_length)
 
     # ARIMA
     if HAS_PMDARIMA and should_use_model(allowed_models, "AutoARIMA_log"):
         a = arima_forecast_log(
-            ylog_train, cfg.arima_m, cfg.arima_stepwise, cfg.arima_max_pq, cfg.arima_max_pq_seas
+            ylog_train,
+            seasonal_length,
+            cfg.arima_stepwise,
+            cfg.arima_max_pq,
+            cfg.arima_max_pq_seas,
         )
         if a is not None:
-            full_y["AutoARIMA_log"] = safe_expm1(a)
+            full_y["AutoARIMA_log"] = safe_expm1(a, log_shift)
 
     # StatsForecast (y)
     sf = statsforecast_one_step(
-        df["month"],
+        df["period_start"],
         y_full,
-        cfg.statsforecast_seasonal_length,
+        seasonal_length,
+        freq=period_freq,
         allowed_models=allowed_models,
     )
     for name, value in sf.items():
@@ -138,21 +139,7 @@ def forecast_next_month(
     else:
         point = float(full_y[chosen_name])
 
-    return point, float(np.log1p(max(point, 0.0)))
-
-
-@dataclass(frozen=True)
-class ForecastResult:
-    rows_in: int
-    rows_after_fill: int
-    missing_months_filled: int
-    chosen_dataset: str
-    chosen_model: str
-    ensemble_models: list[str]
-    metrics: pd.DataFrame
-    backtest: pd.DataFrame
-    next_month: str
-    intervals: pd.DataFrame
+    return point, float(np.log1p(max(point + log_shift, 0.0)))
 
 
 def run_forecast(
@@ -178,9 +165,13 @@ def run_forecast(
     log(f"parse: ok rows={len(df0)}")
     if len(df0) > cfg.max_rows:
         raise ValueError(f"too many rows: {len(df0)} (max {cfg.max_rows})")
-    df1, miss_n = fill_missing_months(df0, fill_missing_with_mean)
+    period_freq = infer_period_freq(df0)
+    df1, miss_n = fill_missing_periods(df0, fill_missing_with_mean)
     mode = "interpolate" if fill_missing_with_mean else "zero"
-    log(f"fill_missing_months: mode={mode} missing={miss_n} rows_after_fill={len(df1)}")
+    log(
+        f"fill_missing_periods: freq={period_freq or 'ordinal'} mode={mode} "
+        f"missing={miss_n} rows_after_fill={len(df1)}"
+    )
     df = add_transforms(df1)
     log("transforms: ok")
     check_abort()
@@ -222,7 +213,8 @@ def run_forecast(
         if len(df) < 3:
             log("statsforecast: skipped (n<3)")
         else:
-            mstl_min_n = max(2 * cfg.statsforecast_seasonal_length, cfg.statsforecast_seasonal_length + 1)
+            seasonal_length = period_seasonal_length(df)
+            mstl_min_n = max(2 * seasonal_length, seasonal_length + 1)
             if len(df) < mstl_min_n:
                 log(f"statsforecast: MSTL skipped (n<{mstl_min_n})")
     if not HAS_SKTIME:
@@ -254,14 +246,17 @@ def run_forecast(
     if "Ensemble_top3_weighted" in all_metrics:
         ensemble_models = ensemble_top_models(all_metrics, cfg.ensemble_topk)
 
-    bt_df = backtest_table(bt.months, bt.actual_y, chosen_bt_forecast)
+    bt_df = backtest_table(bt.periods, bt.actual_y, chosen_bt_forecast)
 
     # errors in log1p space for bootstrap intervals
-    errors_log = np.log1p(bt.actual_y) - np.log1p(np.maximum(chosen_bt_forecast, 0.0) + 1e-9)
+    log_shift = float(df["log_shift"].iloc[-1])
+    errors_log = np.log1p(bt.actual_y + log_shift) - np.log1p(
+        np.maximum(chosen_bt_forecast + log_shift, 0.0) + 1e-9
+    )
 
-    # point forecast + intervals for next month
+    # point forecast + intervals for the next period
     log("intervals: start")
-    point_y, point_log = forecast_next_month(
+    point_y, point_log = forecast_next_period(
         df,
         cfg,
         robust,
@@ -270,12 +265,18 @@ def run_forecast(
         allowed_models=allowed_models,
         on_log=log,
     )
-    intervals = bootstrap_intervals_log1p(errors_log, point_log, cfg.bootstrap_n, cfg.seed)
+    intervals = bootstrap_intervals_log1p(
+        errors_log,
+        point_log,
+        cfg.bootstrap_n,
+        cfg.seed,
+        log_shift=log_shift,
+    )
     _ = point_y
     log("intervals: ok")
     check_abort()
 
-    next_month = df["month"].max() + pd.offsets.MonthBegin(1)
+    next_period = next_period_label(df)
 
     metrics_df = pd.DataFrame(all_metrics).T.sort_values("MAE")
 
@@ -283,83 +284,12 @@ def run_forecast(
     return ForecastResult(
         rows_in=len(df0),
         rows_after_fill=len(df1),
-        missing_months_filled=miss_n,
+        missing_periods_filled=miss_n,
         chosen_dataset=ds_name,
         chosen_model=chosen_name,
         ensemble_models=ensemble_models,
         metrics=metrics_df,
         backtest=bt_df,
-        next_month=format_month(next_month),
+        next_period=next_period,
         intervals=intervals,
     )
-
-
-def format_result_text(res: ForecastResult) -> str:
-    def format_number(value: object) -> object:
-        if isinstance(value, (int, float, np.floating)) and not isinstance(value, bool):
-            if isinstance(value, float) and (np.isnan(value) or np.isinf(value)):
-                return value
-            return f"{value:,.2f}".replace(",", " ")
-        return value
-
-    def as_df(value: object) -> pd.DataFrame:
-        if isinstance(value, pd.DataFrame):
-            df = value.copy()
-        elif isinstance(value, dict):
-            df = pd.DataFrame([value])
-        else:
-            df = pd.DataFrame(value)
-        for col in df.columns:
-            if pd.api.types.is_numeric_dtype(df[col]):
-                df[col] = df[col].map(format_number)
-        return df
-
-    def format_table(value: object, index: bool = False) -> str:
-        df = as_df(value).copy()
-        if index:
-            idx_name = df.index.name or "index"
-            df.insert(0, idx_name, df.index.astype(str))
-
-        cols = [str(c) for c in df.columns]
-        rows = [[str(v) for v in row] for row in df.to_numpy()]
-        widths = [len(c) for c in cols]
-        for row in rows:
-            for i, cell in enumerate(row):
-                widths[i] = max(widths[i], len(cell))
-
-        header = " | ".join(c.ljust(widths[i]) for i, c in enumerate(cols))
-        sep = "-+-".join("-" * widths[i] for i in range(len(widths)))
-        lines = [header, sep]
-        for row in rows:
-            lines.append(" | ".join(row[i].rjust(widths[i]) for i in range(len(widths))))
-        return "\n".join(lines)
-
-    parts = []
-    parts.append("=== DATA ===")
-    parts.append(
-        f"rows_in={res.rows_in} rows_after_fill={res.rows_after_fill} missing_months_filled={res.missing_months_filled}"
-    )
-    parts.append(f"chosen_dataset={res.chosen_dataset}")
-    parts.append("")
-
-    parts.append("=== METRICS ===")
-    parts.append(format_table(res.metrics, index=True))
-    parts.append("")
-
-    parts.append("=== CHOSEN_FORECAST_FOR_REPORTING ===")
-    if res.chosen_model == "Ensemble_top3_weighted" and res.ensemble_models:
-        parts.append(f"{res.chosen_model} (models: {', '.join(res.ensemble_models)})")
-    else:
-        parts.append(res.chosen_model)
-    parts.append("")
-
-    parts.append("=== BACKTEST_TABLE ===")
-    parts.append(format_table(res.backtest, index=False))
-    parts.append("")
-
-    parts.append("=== FINAL_FORECAST_NEXT_MONTH ===")
-    parts.append(f"next_month={res.next_month}")
-    parts.append(format_table(res.intervals, index=False))
-    parts.append("")
-
-    return "\n".join(parts)

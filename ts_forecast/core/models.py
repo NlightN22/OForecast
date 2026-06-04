@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass
@@ -40,9 +42,9 @@ def winsorize_log(ylog: np.ndarray, q_low: float, q_high: float) -> np.ndarray:
     return np.clip(ylog, lo, hi)
 
 
-def safe_expm1(x: float) -> float:
+def safe_expm1(x: float, shift: float = 0.0) -> float:
     x = float(np.clip(x, -50, 50))
-    return float(np.expm1(x))
+    return float(np.expm1(x) - shift)
 
 
 def ses_forecast_log(ylog_train: np.ndarray) -> float:
@@ -71,9 +73,9 @@ def ets_forecast_log(
         return float(ylog_train[-1])
 
 
-def seasonal_naive_y(y_train: np.ndarray) -> float:
-    if len(y_train) >= 13:
-        return float(y_train[-12])
+def seasonal_naive_y(y_train: np.ndarray, seasonal_periods: int = 12) -> float:
+    if len(y_train) > seasonal_periods:
+        return float(y_train[-seasonal_periods])
     return float(y_train[-1])
 
 
@@ -87,19 +89,24 @@ def arima_forecast_log(
     if not HAS_PMDARIMA:
         return None
     try:
-        model = pm.auto_arima(
-            ylog_train,
-            seasonal=True,
-            m=m,
-            stepwise=stepwise,
-            suppress_warnings=True,
-            error_action="ignore",
-            information_criterion="aic",
-            max_p=max_pq,
-            max_q=max_pq,
-            max_P=max_pq_seas,
-            max_Q=max_pq_seas,
-        )
+        use_seasonal = m > 1 and len(ylog_train) >= (2 * m + 1)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", module=r"pmdarima\..*")
+            warnings.filterwarnings("ignore", module=r"statsmodels\..*")
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            model = pm.auto_arima(
+                ylog_train,
+                seasonal=use_seasonal,
+                m=m if use_seasonal else 1,
+                stepwise=stepwise,
+                suppress_warnings=True,
+                error_action="ignore",
+                information_criterion="aic",
+                max_p=max_pq,
+                max_q=max_pq,
+                max_P=max_pq_seas if use_seasonal else 0,
+                max_Q=max_pq_seas if use_seasonal else 0,
+            )
         return float(model.predict(n_periods=1)[0])
     except Exception:
         return float(ylog_train[-1])
@@ -109,16 +116,23 @@ def statsforecast_one_step(
     ds: pd.Series,
     y_train: np.ndarray,
     seasonal_length: int,
+    freq: Optional[str] = "MS",
     allowed_models: Optional[set[str]] = None,
 ) -> Dict[str, float]:
     if not HAS_STATSFORECAST:
         return {}
     if len(y_train) < 3:
         return {}
+    if freq is None:
+        freq = "MS"
+    ds_values = pd.to_datetime(ds)
+    if pd.isna(ds_values).any():
+        ds_values = pd.date_range("2000-01-01", periods=len(y_train), freq=freq)
+
     df = pd.DataFrame(
         {
             "unique_id": "series",
-            "ds": pd.to_datetime(ds),
+            "ds": ds_values,
             "y": y_train,
         }
     )
@@ -157,7 +171,7 @@ def statsforecast_one_step(
         return {}
 
     try:
-        sf = StatsForecast(models=models, freq="MS")
+        sf = StatsForecast(models=models, freq=freq)
         fcst = sf.forecast(df=df, h=1)
     except Exception:
         return {}

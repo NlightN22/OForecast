@@ -10,7 +10,6 @@ __pycache__/
 htmlcov/
 build/
 dist/
-tests/
 *.egg-info/
 .tox/
 .env
@@ -20,3 +19,4 @@ tests/
 *.log
 build_and_push.ps1
 release
+/tasks/

@@ -61,7 +61,7 @@ pre {{ white-space: pre-wrap; background: #f6f6f6; padding: 12px; border: 1px so
 <form id="forecast-form" method="post" action="/forecast/form">
   <textarea id="raw" name="raw" placeholder="Paste data here (same format as data.txt)"></textarea>
   <div>
-    <label><input type="checkbox" id="fill_missing_with_mean" name="fill_missing_with_mean"{fill_checked}> Fill missing months by interpolation</label>
+    <label><input type="checkbox" id="fill_missing_with_mean" name="fill_missing_with_mean"{fill_checked}> Fill missing recognized periods by interpolation</label>
   </div>
   <div>
     <label><input type="checkbox" id="use_all" name="use_all"{use_all_checked}> Use all models</label>
@@ -216,13 +216,13 @@ def forecast_json(payload: ForecastRequest) -> ForecastResponse:
     return ForecastResponse(
         rows_in=res.rows_in,
         rows_after_fill=res.rows_after_fill,
-        missing_months_filled=res.missing_months_filled,
+        missing_periods_filled=res.missing_periods_filled,
         chosen_dataset=res.chosen_dataset,
         chosen_model=res.chosen_model,
         metrics=res.metrics.to_dict(orient="records"),
         backtest=res.backtest.to_dict(orient="records"),
-        next_month=res.next_month,
-        intervals=res.intervals.to_dict(orient="records"),
+        next_period=res.next_period,
+        intervals=[res.intervals],
     )
 
 

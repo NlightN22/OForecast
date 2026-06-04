@@ -1,5 +1,5 @@
 """
-ts_forecast: robust monthly time-series forecasting (1 month ahead)
+ts_forecast: robust time-series forecasting for labeled numeric series
 """
 
 from .core.config import ForecastConfig

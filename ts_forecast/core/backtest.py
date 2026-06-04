@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Callable
 
 from .config import ForecastConfig
+from ..io.parsing import infer_period_freq, period_seasonal_length
 from .models import (
     winsorize_log,
     safe_expm1,
@@ -23,7 +24,7 @@ from .models import (
 
 @dataclass
 class BacktestResult:
-    months: List[pd.Timestamp]
+    periods: List[object]
     actual_y: np.ndarray
     preds_y: Dict[str, np.ndarray]  # model -> y-space preds
     diagnostics: Dict[str, str]
@@ -44,7 +45,7 @@ def walk_forward(
     tlen = _test_len(n, cfg)
     start = n - tlen
 
-    months: List[pd.Timestamp] = []
+    periods: List[object] = []
     actual: List[float] = []
     preds: Dict[str, List[float]] = {}
     diagnostics: Dict[str, str] = {}
@@ -59,6 +60,9 @@ def walk_forward(
         train = df.iloc[:i]
         y_train = train["y"].to_numpy(dtype=float)
         ylog_train = train["y_log"].to_numpy(dtype=float)
+        log_shift = float(train["log_shift"].iloc[-1])
+        period_freq = infer_period_freq(train)
+        seasonal_length = period_seasonal_length(train)
 
         if robust:
             ylog_train = winsorize_log(ylog_train, cfg.winsor_q_low, cfg.winsor_q_high)
@@ -66,7 +70,7 @@ def walk_forward(
         # SES(log)
         if should_use_model(allowed_models, "SES_log"):
             f_log = ses_forecast_log(ylog_train)
-            preds.setdefault("SES_log", []).append(safe_expm1(f_log))
+            preds.setdefault("SES_log", []).append(safe_expm1(f_log, log_shift))
 
         # ETS(log) grid
         use_seasonal = len(ylog_train) >= cfg.ets_seasonal_min_n
@@ -78,32 +82,35 @@ def walk_forward(
                 name = f"ETS_log_trend={tr}_seasonal={seas}"
                 if should_use_model(allowed_models, name):
                     f = ets_forecast_log(ylog_train, tr, seas, sp)
-                    preds.setdefault(name, []).append(safe_expm1(f))
+                    preds.setdefault(name, []).append(safe_expm1(f, log_shift))
 
         # Seasonal naive (y)
         if should_use_model(allowed_models, "SeasonalNaive_y"):
-            preds.setdefault("SeasonalNaive_y", []).append(seasonal_naive_y(y_train))
+            preds.setdefault("SeasonalNaive_y", []).append(
+                seasonal_naive_y(y_train, seasonal_length)
+            )
 
         # ARIMA(log) optional
         if include_arima and HAS_PMDARIMA and should_use_model(allowed_models, "AutoARIMA_log"):
             a = arima_forecast_log(
                 ylog_train,
-                m=cfg.arima_m,
+                m=seasonal_length,
                 stepwise=cfg.arima_stepwise,
                 max_pq=cfg.arima_max_pq,
                 max_pq_seas=cfg.arima_max_pq_seas,
             )
             if a is not None:
-                preds.setdefault("AutoARIMA_log", []).append(safe_expm1(a))
+                preds.setdefault("AutoARIMA_log", []).append(safe_expm1(a, log_shift))
         elif include_arima and should_use_model(allowed_models, "AutoARIMA_log") and not HAS_PMDARIMA:
             diagnostics.setdefault("AutoARIMA_log", "pmdarima unavailable")
 
         # StatsForecast (y)
         if HAS_STATSFORECAST:
             sf = statsforecast_one_step(
-                train["month"],
+                train["period_start"],
                 y_train,
-                cfg.statsforecast_seasonal_length,
+                seasonal_length,
+                freq=period_freq,
                 allowed_models=allowed_models,
             )
             for name, value in sf.items():
@@ -122,7 +129,10 @@ def walk_forward(
                 if tb_err:
                     tbats_err = tb_err
 
-        months.append(df.loc[i, "month"])
+        period_value = df.loc[i, "period_start"]
+        if pd.isna(period_value):
+            period_value = df.loc[i, "label"]
+        periods.append(period_value)
         actual.append(float(df.loc[i, "y"]))
 
     if should_use_model(allowed_models, "TBATS_y") and tbats_fail_count:
@@ -131,7 +141,7 @@ def walk_forward(
         elif tbats_err:
             diagnostics.setdefault(
                 "TBATS_y",
-                f"failed in {tbats_fail_count}/{len(months)} windows: {tbats_err}",
+                    f"failed in {tbats_fail_count}/{len(periods)} windows: {tbats_err}",
             )
 
     preds_np = {k: np.asarray(v, dtype=float) for k, v in preds.items()}
@@ -148,7 +158,7 @@ def walk_forward(
             filtered[name] = values
         preds_np = filtered
     return BacktestResult(
-        months=months,
+        periods=periods,
         actual_y=np.asarray(actual, dtype=float),
         preds_y=preds_np,
         diagnostics=diagnostics,

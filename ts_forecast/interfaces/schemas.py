@@ -17,7 +17,7 @@ class ForecastRequest(BaseModel):
     )
     fill_missing_with_mean: bool = Field(
         default=False,
-        description="Fill missing months by interpolation; when false, missing months use 0",
+        description="Fill missing recognized periods by interpolation; when false, missing periods use 0",
     )
     run_id: str | None = Field(
         default=None,
@@ -28,10 +28,10 @@ class ForecastRequest(BaseModel):
 class ForecastResponse(BaseModel):
     rows_in: int
     rows_after_fill: int
-    missing_months_filled: int
+    missing_periods_filled: int
     chosen_dataset: str
     chosen_model: str
     metrics: List[Dict[str, Any]]
     backtest: List[Dict[str, Any]]
-    next_month: str
+    next_period: str
     intervals: List[Dict[str, Any]]
