@@ -56,6 +56,22 @@ body {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation 
 textarea {{ width: 100%; max-width: 900px; height: 320px; }}
 select {{ width: 100%; max-width: 900px; height: 180px; }}
 pre {{ white-space: pre-wrap; background: #f6f6f6; padding: 12px; border: 1px solid #ddd; }}
+#scroll-top {{
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  width: 44px;
+  height: 44px;
+  border: 1px solid #999;
+  background: #fff;
+  color: #111;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  display: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}}
+#scroll-top.is-visible {{ display: block; }}
 </style>
 <h1>OForecast</h1>
 <form id="forecast-form" method="post" action="/forecast/form">
@@ -80,6 +96,7 @@ pre {{ white-space: pre-wrap; background: #f6f6f6; padding: 12px; border: 1px so
   <span id="timer">00:00</span>
 </div>
 <pre id="log"></pre>
+<button id="scroll-top" type="button" aria-label="Back to top" title="Back to top">↑</button>
 <script>
 const form = document.getElementById("forecast-form");
 const log = document.getElementById("log");
@@ -90,6 +107,7 @@ const rawInput = document.getElementById("raw");
 const modelsSelect = document.getElementById("models");
 const useAll = document.getElementById("use_all");
 const fillMissing = document.getElementById("fill_missing_with_mean");
+const scrollTopBtn = document.getElementById("scroll-top");
 let abortController = null;
 let timerId = null;
 let startTs = 0;
@@ -99,6 +117,14 @@ const syncModels = () => {{
 }};
 useAll.addEventListener("change", syncModels);
 syncModels();
+const syncScrollTop = () => {{
+  scrollTopBtn.classList.toggle("is-visible", window.scrollY > window.innerHeight / 2);
+}};
+window.addEventListener("scroll", syncScrollTop, {{ passive: true }});
+scrollTopBtn.addEventListener("click", () => {{
+  window.scrollTo({{ top: 0, behavior: "smooth" }});
+}});
+syncScrollTop();
 form.addEventListener("submit", async (e) => {{
   e.preventDefault();
   log.textContent = "";
