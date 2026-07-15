@@ -1,8 +1,8 @@
 """
-Чтение Excel-файла.
+Excel file reader.
 
-Парсер не содержит никакой логики обработки данных.
-Его задача — только загрузить лист Excel в DataFrame.
+The parser does not contain data transformation logic.
+Its only job is to load an Excel sheet into a DataFrame.
 """
 
 from __future__ import annotations
@@ -28,12 +28,12 @@ class ExcelParser:
         filename: str | Path,
     ) -> pd.DataFrame:
         """
-        Читает Excel-файл.
+        Read an Excel file.
 
         Parameters
         ----------
         filename
-            Путь к Excel-файлу.
+            Path to the Excel file.
 
         Returns
         -------
@@ -45,7 +45,7 @@ class ExcelParser:
         if not filename.exists():
 
             raise FileNotFoundError(
-                f"Файл не найден:\n{filename}"
+                f"File not found:\n{filename}"
             )
 
         try:
@@ -60,13 +60,13 @@ class ExcelParser:
         except Exception as exc:
 
             raise RuntimeError(
-                f"Ошибка чтения Excel:\n{exc}"
+                f"Excel read error:\n{exc}"
             ) from exc
 
         if dataframe.empty:
 
             raise ValueError(
-                "Excel-файл пуст."
+                "Excel file is empty."
             )
 
         return dataframe
@@ -78,7 +78,7 @@ class ExcelParser:
         filename: str | Path,
     ) -> list[str]:
         """
-        Возвращает список листов книги.
+        Return workbook sheet names.
         """
 
         filename = Path(filename)
@@ -102,7 +102,7 @@ class ExcelParser:
         sheet_name: str,
     ) -> pd.DataFrame:
         """
-        Читает указанный лист книги.
+        Read a specific workbook sheet.
         """
 
         filename = Path(filename)

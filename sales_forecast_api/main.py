@@ -17,16 +17,16 @@ def main() -> None:
     client = ForecastApiClient()
     writer = ExcelWriter()
 
-    print("Чтение Excel...")
+    print("Reading Excel...")
     dataframe = parser.read(INPUT_FILE)
 
-    print("Формирование данных для API...")
+    print("Preparing API data...")
     rows = transformer.run(dataframe)
 
     if not rows:
-        raise ValueError("Не найдено данных для отправки в API.")
+        raise ValueError("No data found to send to the API.")
 
-    print(f"Задач прогноза: {len(rows)}")
+    print(f"Forecast tasks: {len(rows)}")
 
     results = []
 
@@ -47,7 +47,7 @@ def main() -> None:
             }
         )
 
-    print("Сохранение Excel...")
+    print("Saving Excel...")
 
     writer.save(
         results=results,
@@ -56,8 +56,8 @@ def main() -> None:
 
     elapsed = time.perf_counter() - started_at
 
-    print(f"Готово: {OUTPUT_FILE}")
-    print(f"Время работы: {elapsed:.2f} сек.")
+    print(f"Done: {OUTPUT_FILE}")
+    print(f"Runtime: {elapsed:.2f} sec.")
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ class ExcelParser:
         path = Path(filename)
 
         if not path.exists():
-            raise FileNotFoundError(f"Файл не найден: {path}")
+            raise FileNotFoundError(f"File not found: {path}")
 
         try:
             df = pd.read_excel(
@@ -24,9 +24,9 @@ class ExcelParser:
             )
 
         except Exception as exc:
-            raise RuntimeError(f"Ошибка чтения Excel: {exc}") from exc
+            raise RuntimeError(f"Excel read error: {exc}") from exc
 
         if df.empty:
-            raise ValueError("Excel-файл пуст.")
+            raise ValueError("Excel file is empty.")
 
         return df

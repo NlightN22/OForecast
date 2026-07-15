@@ -52,22 +52,22 @@ class ExcelWriter:
             intervals = response.get("intervals", [])
             interval = intervals[0] if intervals else {}
             row = {
-                "Бренд": item["brand"],
-                "Следующий период": response.get("next_period"),
-                "Прогноз": interval.get("point"),
-                "Нижняя 80%": interval.get("lo80"),
-                "Верхняя 80%": interval.get("hi80"),
-                "Нижняя 95%": interval.get("lo95"),
-                "Верхняя 95%": interval.get("hi95"),
-                "Модель": response.get("chosen_model"),
-                "Датасет": response.get("chosen_dataset"),
-                "Строк в расчете": response.get("rows_in"),
+                "Brand": item["brand"],
+                "Next Period": response.get("next_period"),
+                "Forecast": interval.get("point"),
+                "Lower 80%": interval.get("lo80"),
+                "Upper 80%": interval.get("hi80"),
+                "Lower 95%": interval.get("lo95"),
+                "Upper 95%": interval.get("hi95"),
+                "Model": response.get("chosen_model"),
+                "Dataset": response.get("chosen_dataset"),
+                "Rows In": response.get("rows_in"),
             }
 
             if item["forecast_level"] == "brand_total":
                 total_rows.append(row)
             else:
-                employee_rows.append({"Сотрудник": item["manager"], **row})
+                employee_rows.append({"Employee": item["manager"], **row})
 
         return pd.DataFrame(total_rows), pd.DataFrame(employee_rows)
 
@@ -103,8 +103,8 @@ class ExcelWriter:
                 cell.border = THIN_BORDER
 
         numeric_headers = {
-            "Прогноз", "Нижняя 80%", "Верхняя 80%",
-            "Нижняя 95%", "Верхняя 95%", "Строк в расчете",
+            "Forecast", "Lower 80%", "Upper 80%",
+            "Lower 95%", "Upper 95%", "Rows In",
         }
         for cell in sheet[2]:
             if cell.value in numeric_headers:

@@ -1,5 +1,5 @@
 """
-Общие вспомогательные функции.
+Shared helper functions.
 """
 
 from __future__ import annotations
@@ -12,17 +12,29 @@ import pandas as pd
 
 MONTHS = {
     "январь": 1,
+    "january": 1,
     "февраль": 2,
+    "february": 2,
     "март": 3,
+    "march": 3,
     "апрель": 4,
+    "april": 4,
     "май": 5,
+    "may": 5,
     "июнь": 6,
+    "june": 6,
     "июль": 7,
+    "july": 7,
     "август": 8,
+    "august": 8,
     "сентябрь": 9,
+    "september": 9,
     "октябрь": 10,
+    "october": 10,
     "ноябрь": 11,
+    "november": 11,
     "декабрь": 12,
+    "december": 12,
 }
 
 
@@ -31,7 +43,7 @@ MONTHS = {
 
 def normalize_text(value) -> str:
     """
-    Нормализует текстовое значение.
+    Normalize a text value.
     """
 
     if value is None:
@@ -54,7 +66,7 @@ def normalize_text(value) -> str:
 
 def to_float(value) -> float:
     """
-    Безопасное преобразование значения Excel в float.
+    Safely convert an Excel value to float.
     """
 
     if value is None:
@@ -86,11 +98,11 @@ def to_float(value) -> float:
 
 def parse_month(value) -> pd.Timestamp | None:
     """
-    Преобразует строку
+    Convert a localized month label such as
 
-        Январь 2024
+        January 2024
 
-    в Timestamp.
+    into a Timestamp.
     """
 
     text = normalize_text(value).lower()
@@ -135,7 +147,7 @@ def ensure_monthly_index(
     series: pd.Series,
 ) -> pd.Series:
     """
-    Делает временной ряд непрерывным.
+    Make a time series continuous.
     """
 
     if series.empty:
@@ -161,8 +173,7 @@ def ensure_monthly_index(
 
 def is_month(value) -> bool:
     """
-    Проверяет,
-    является ли значение месяцем.
+    Check whether a value is a month label.
     """
 
     return parse_month(value) is not None
@@ -173,8 +184,7 @@ def is_month(value) -> bool:
 
 def is_empty(value) -> bool:
     """
-    Проверяет,
-    является ли значение пустым.
+    Check whether a value is empty.
     """
 
     return normalize_text(value) == ""

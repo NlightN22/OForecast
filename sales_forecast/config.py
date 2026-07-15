@@ -1,11 +1,11 @@
 """
-Настройки проекта Sales Forecast.
+Sales Forecast project settings.
 """
 
 from pathlib import Path
 
 # -----------------------------------------------------------------------------
-# Пути
+# Paths
 # -----------------------------------------------------------------------------
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -20,47 +20,48 @@ OUTPUT_FILE = OUTPUT_DIR / "Sales_Forecast.xlsx"
 # Excel
 # -----------------------------------------------------------------------------
 
-# Первый лист книги
+# First workbook sheet
 SHEET_NAME = 0
 
-# Строка с брендами (нумерация с 0)
+# Brand header row, 1-based
 HEADER_ROW = 8
 
-# Первые две колонки:
-# 0 - сотрудник
-# 1 - месяц
+# First two columns:
+# 0 - employee
+# 1 - month
 ROW_LABEL_COLUMN = 1
 FIRST_BRAND_COLUMN = 2
 
-# Эти значения не считаются брендами
+# These values are not treated as brands
 IGNORED_COLUMNS = {
     "",
     "Итог",
     "Итого",
     "Всего",
+    "Total",
 }
 
 # -----------------------------------------------------------------------------
-# Прогнозирование
+# Forecasting
 # -----------------------------------------------------------------------------
 
-# На сколько месяцев строить прогноз
+# Forecast horizon in months
 FORECAST_MONTHS = 3
 
-# Минимальное количество месяцев истории
+# Minimum history length in months
 MIN_HISTORY_MONTHS = 12
 
-# Заполнять отсутствующие месяцы
+# Fill missing months
 FILL_MISSING_MONTHS = True
 
 # -----------------------------------------------------------------------------
 # OForecast
 # -----------------------------------------------------------------------------
 
-# Какие модели исключить
+# Models to exclude
 DISABLED_MODELS = {
     "TBATS_y",
 }
 
-# Вывод полного отчета
+# Print full report
 PRINT_FULL_REPORT = True

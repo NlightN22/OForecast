@@ -1,5 +1,5 @@
 """
-Сохранение результатов прогнозирования в Excel.
+Save forecast results to Excel.
 """
 
 from __future__ import annotations
@@ -237,7 +237,7 @@ class ExcelWriter:
         filename: str,
     ) -> None:
         """
-        Сохраняет результат прогнозирования.
+        Save forecast results.
         """
 
         self._validate(result)
@@ -263,12 +263,12 @@ class ExcelWriter:
         except PermissionError:
 
             raise PermissionError(
-                f"Файл '{filename}' открыт в Excel. "
-                "Закройте его и повторите попытку."
+                f"File '{filename}' is open in Excel. "
+                "Close it and try again."
             )
 
         except Exception as exc:
 
             raise RuntimeError(
-                f"Ошибка сохранения Excel:\n{exc}"
+                f"Excel save error:\n{exc}"
             ) from exc

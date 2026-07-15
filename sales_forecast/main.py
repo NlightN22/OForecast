@@ -1,12 +1,12 @@
 """
-Точка входа.
+Application entry point.
 
-Последовательность:
+Execution flow:
 
-1. Чтение Excel
-2. Преобразование данных
-3. Расчет прогноза
-4. Сохранение результата
+1. Read Excel
+2. Transform data
+3. Calculate forecast
+4. Save the result
 """
 
 from pathlib import Path
@@ -43,10 +43,10 @@ def main():
     if not Path(INPUT_FILE).exists():
 
         raise FileNotFoundError(
-            f"Файл не найден:\n{INPUT_FILE}"
+            f"File not found:\n{INPUT_FILE}"
         )
 
-    print("Чтение Excel...")
+    print("Reading Excel...")
 
     parser = ExcelParser()
 
@@ -55,10 +55,10 @@ def main():
     )
 
     print(
-        f"Строк: {len(raw_df)}"
+        f"Rows: {len(raw_df)}"
     )
 
-    print("Преобразование данных...")
+    print("Transforming data...")
 
     transformer = SalesTransformer()
 
@@ -67,10 +67,10 @@ def main():
     )
 
     print(
-        f"Получено рядов: {forecast_df['unique_id'].nunique()}"
+        f"Series prepared: {forecast_df['unique_id'].nunique()}"
     )
 
-    print("Расчет прогноза...")
+    print("Calculating forecast...")
 
     adapter = OForecastAdapter()
 
@@ -78,7 +78,7 @@ def main():
         forecast_df
     )
 
-    print("Сохранение Excel...")
+    print("Saving Excel...")
 
     writer = ExcelWriter()
 
@@ -91,14 +91,14 @@ def main():
 
     print("-" * 60)
 
-    print("Готово.")
+    print("Done.")
 
     print(
-        f"Время выполнения: {elapsed:.2f} сек."
+        f"Runtime: {elapsed:.2f} sec."
     )
 
     print(
-        f"Файл сохранен:\n{OUTPUT_FILE}"
+        f"File saved:\n{OUTPUT_FILE}"
     )
 
     print("-" * 60)

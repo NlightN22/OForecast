@@ -9,7 +9,7 @@ import pandas as pd
 from config import HEADER_ROW, FIRST_BRAND_COLUMN, PERIOD_COLUMN, DROP_ZERO_ROWS
 
 
-IGNORED_COLUMNS = {"", "итог", "итого", "всего", "общий итог"}
+IGNORED_COLUMNS = {"", "итог", "итого", "всего", "общий итог", "total"}
 
 
 @dataclass
@@ -56,7 +56,7 @@ def is_month_label(value) -> bool:
 
     return bool(
         re.match(
-            r"^(январь|февраль|март|апрель|май|июнь|июль|август|сентябрь|октябрь|ноябрь|декабрь)\s+\d{4}\s*г?\.?$",
+            r"^(январь|февраль|март|апрель|май|июнь|июль|август|сентябрь|октябрь|ноябрь|декабрь|january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}\s*г?\.?$",
             text,
         )
     )
@@ -64,7 +64,7 @@ def is_month_label(value) -> bool:
 
 def is_total_label(value) -> bool:
     text = normalize_text(value).lower()
-    return text in {"итог", "итого", "всего", "общий итог"}
+    return text in IGNORED_COLUMNS
 
 
 def format_number_for_api(value: float) -> str:
@@ -109,7 +109,7 @@ class SalesApiTransformer:
             column += 1
 
         if not brands:
-            raise ValueError("Не удалось найти бренды в Excel.")
+            raise ValueError("Could not find brands in Excel.")
 
         return brands
 
