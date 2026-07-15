@@ -99,6 +99,26 @@ Important API settings:
 - `FILL_MISSING_WITH_MEAN = False` - missing recognized periods use zero.
 - `DROP_ZERO_ROWS = False` - preserve zero-sales months.
 
+API request format:
+
+```json
+{
+  "raw": "period | value\nJanuary 2023 | 1200\nFebruary 2023 | 1350",
+  "models": ["SES_log", "ETS_log_trend=None_seasonal=None", "AutoARIMA_log"],
+  "use_all": false,
+  "fill_missing_with_mean": false
+}
+```
+
+Fields: `raw` is one time series in the OForecast text format, `models` are the
+requested model names, `use_all=false` limits the run to that list, and
+`fill_missing_with_mean=false` keeps missing periods from being interpolated with
+the mean value.
+
+The response is JSON from the OForecast server. The application uses the final
+forecast, intervals, selected model, selected dataset, and metadata for the
+Excel report.
+
 ### Web service
 
 Run the OForecast web application locally:
@@ -227,6 +247,25 @@ API-версия преобразует каждый ряд в текстовы�
 - `USE_ALL = False` - использовать только указанный список моделей.
 - `FILL_MISSING_WITH_MEAN = False` - пропущенные периоды заполняются нулями.
 - `DROP_ZERO_ROWS = False` - месяцы с нулевыми продажами сохраняются.
+
+Формат API-запроса:
+
+```json
+{
+  "raw": "period | value\nЯнварь 2023 г. | 1200\nФевраль 2023 г. | 1350",
+  "models": ["SES_log", "ETS_log_trend=None_seasonal=None", "AutoARIMA_log"],
+  "use_all": false,
+  "fill_missing_with_mean": false
+}
+```
+
+Поля: `raw` - один временной ряд в текстовом формате OForecast, `models` -
+запрошенные модели, `use_all=false` ограничивает расчет этим списком, а
+`fill_missing_with_mean=false` отключает интерполяцию пропусков средним.
+
+Ответом является JSON от сервера OForecast. Приложение берет из него прогноз,
+интервалы, выбранную модель, выбранный датасет и служебные данные для
+Excel-отчета.
 
 ### Веб-сервис
 
