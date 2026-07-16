@@ -14,10 +14,14 @@ from tests.forecast_scenarios import SCENARIOS, STABLE_MODEL_SET, read_fixture
 from ts_forecast.web.app import app
 
 
-@unittest.skipIf(TestClient is None, f"FastAPI TestClient unavailable: {TESTCLIENT_IMPORT_ERROR}")
+@unittest.skipIf(
+    TestClient is None, f"FastAPI TestClient unavailable: {TESTCLIENT_IMPORT_ERROR}"
+)
 class ForecastWebScenariosTest(unittest.TestCase):
     def test_forecast_json_endpoint_runs_selected_models(self) -> None:
-        scenario = next(item for item in SCENARIOS if item.fixture == "data_iso_periods.txt")
+        scenario = next(
+            item for item in SCENARIOS if item.fixture == "data_iso_periods.txt"
+        )
         client = TestClient(app)
 
         response = client.post(
@@ -38,4 +42,3 @@ class ForecastWebScenariosTest(unittest.TestCase):
         self.assertTrue(payload["metrics"])
         self.assertTrue(payload["backtest"])
         self.assertTrue(payload["intervals"])
-

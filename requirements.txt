@@ -7,5 +7,6 @@ sktime>=0.28
 tbats
 scikit-learn<1.6
 statsmodels
-numpy<2
+numpy<2; python_version < "3.13"
+numpy>=2; python_version >= "3.13"
 dateparser

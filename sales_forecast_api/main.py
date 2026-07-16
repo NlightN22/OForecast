@@ -5,7 +5,7 @@ import time
 from config import INPUT_FILE, OUTPUT_FILE
 from parser import ExcelParser
 from transformer import SalesApiTransformer
-from api_client import ForecastApiClient
+from api_client import ForecastApiClient, ForecastApiError
 from excel_writer import ExcelWriter
 
 
@@ -36,7 +36,18 @@ def main() -> None:
             f"{item.forecast_level} / {item.manager} / {item.brand}"
         )
 
-        response = client.forecast(item.raw)
+        try:
+            response = client.forecast(item.raw)
+        except ForecastApiError as exc:
+            response = {
+                "intervals": [{"point": None}],
+                "next_period": "",
+                "chosen_model": "",
+                "chosen_dataset": "",
+                "rows_in": None,
+                "status": "error",
+                "error": str(exc),
+            }
 
         results.append(
             {

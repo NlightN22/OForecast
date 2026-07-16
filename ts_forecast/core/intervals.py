@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 
+
 def safe_expm1_arr(x: np.ndarray, shift: float = 0.0) -> np.ndarray:
     x = np.asarray(x, dtype=float)
     x = np.clip(x, -50, 50)
     return np.expm1(x) - shift
+
 
 def bootstrap_intervals_log1p(
     errors_log: np.ndarray,

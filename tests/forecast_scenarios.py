@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pandas as pd
 
-
 TESTS_DIR = Path(__file__).resolve().parent
 
 
@@ -99,4 +98,3 @@ STABLE_MODEL_SET = [
 
 def read_fixture(name: str) -> str:
     return (TESTS_DIR / name).read_text(encoding="utf-8")
-

@@ -16,7 +16,10 @@ dist/
 .env.*
 .vscode/
 .idea/
+.DS_Store
 *.log
 build_and_push.ps1
 release
 /tasks/
+sales_forecast/Sales.xlsx
+sales_forecast_api/Sales.xlsx

@@ -5,6 +5,7 @@ from typing import Dict, Tuple
 
 from .metrics import calc_metrics
 
+
 def build_ensemble_or_best(
     actual_y: np.ndarray,
     preds_y: Dict[str, np.ndarray],

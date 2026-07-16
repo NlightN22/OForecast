@@ -127,7 +127,6 @@ class OForecastAdapter:
         return "\n".join(lines)
 
     @staticmethod
-    @staticmethod
     def _series_meta(dataframe: pd.DataFrame) -> dict[str, str]:
         first = dataframe.iloc[0]
         return {
@@ -145,9 +144,7 @@ class OForecastAdapter:
         return {
             **meta,
             "next_period": result.next_period,
-            "forecast": OForecastAdapter._clean_value(
-                result.intervals.get("point")
-            ),
+            "forecast": OForecastAdapter._clean_value(result.intervals.get("point")),
             "lo80": OForecastAdapter._clean_value(result.intervals.get("lo80")),
             "hi80": OForecastAdapter._clean_value(result.intervals.get("hi80")),
             "lo95": OForecastAdapter._clean_value(result.intervals.get("lo95")),

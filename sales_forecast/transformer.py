@@ -1,27 +1,24 @@
-from collections import defaultdict
-
 import pandas as pd
+
+from sales_common.text import ensure_monthly_index
+from sales_common.workbook import SalesLayout, brand_totals, extract_sales
 
 try:
     from .config import (
         FILL_MISSING_MONTHS,
         FIRST_BRAND_COLUMN,
         HEADER_ROW,
-        IGNORED_COLUMNS,
         MIN_HISTORY_MONTHS,
         ROW_LABEL_COLUMN,
     )
-    from .utils import ensure_monthly_index, normalize_text, parse_month, to_float
 except ImportError:  # pragma: no cover - script execution fallback
     from config import (
         FILL_MISSING_MONTHS,
         FIRST_BRAND_COLUMN,
         HEADER_ROW,
-        IGNORED_COLUMNS,
         MIN_HISTORY_MONTHS,
         ROW_LABEL_COLUMN,
     )
-    from utils import ensure_monthly_index, normalize_text, parse_month, to_float
 
 
 TOTAL_MANAGER = "All managers"
@@ -32,68 +29,19 @@ class SalesTransformer:
         if dataframe.empty:
             raise ValueError("Empty DataFrame.")
 
-        brands = self._read_brands(dataframe)
-        if not brands:
-            raise ValueError("Brands not found.")
-
-        total_sales, manager_sales = self._collect_sales(dataframe, brands)
-        return self._build_dataframe(total_sales, manager_sales)
-
-    def _read_brands(self, dataframe: pd.DataFrame) -> list[str]:
-        row = dataframe.iloc[HEADER_ROW - 1]
-        brands = []
-
-        for column in range(FIRST_BRAND_COLUMN, len(row)):
-            value = normalize_text(row.iloc[column])
-            if value in IGNORED_COLUMNS:
-                break
-            brands.append(value)
-
-        return brands
-
-    def _collect_sales(
-        self,
-        dataframe: pd.DataFrame,
-        brands: list[str],
-    ) -> tuple[
-        dict[str, dict[pd.Timestamp, float]],
-        dict[tuple[str, str], dict[pd.Timestamp, float]],
-    ]:
-        total_sales = defaultdict(lambda: defaultdict(float))
-        manager_sales = defaultdict(lambda: defaultdict(float))
-        current_manager = ""
-
-        for row_index in range(HEADER_ROW + 1, len(dataframe)):
-            row = dataframe.iloc[row_index]
-            row_label = normalize_text(row.iloc[ROW_LABEL_COLUMN])
-
-            if row_label == "":
-                continue
-
-            month = parse_month(row_label)
-            if month is None:
-                if row_label not in IGNORED_COLUMNS:
-                    current_manager = row_label
-                continue
-
-            if not current_manager:
-                continue
-
-            for offset, brand in enumerate(brands):
-                column = FIRST_BRAND_COLUMN + offset
-                if column >= len(row):
-                    break
-
-                value = to_float(row.iloc[column])
-                total_sales[brand][month] += value
-                manager_sales[(current_manager, brand)][month] += value
-
-        return total_sales, manager_sales
+        layout = SalesLayout(
+            header_row=HEADER_ROW,
+            row_label_column=ROW_LABEL_COLUMN,
+            first_brand_column=FIRST_BRAND_COLUMN,
+        )
+        workbook_data = extract_sales(dataframe, layout)
+        totals = brand_totals(workbook_data.manager_sales)
+        return self._build_dataframe(totals, workbook_data.manager_sales)
 
     def _build_dataframe(
         self,
         total_sales: dict[str, dict[pd.Timestamp, float]],
-        manager_sales: dict[tuple[str, str], dict[pd.Timestamp, float]],
+        manager_sales: dict[str, dict[str, dict[pd.Timestamp, float]]],
     ) -> pd.DataFrame:
         rows = []
         end_period = self._max_period(total_sales)
@@ -109,16 +57,17 @@ class SalesTransformer:
                 )
             )
 
-        for (manager, brand), history in sorted(manager_sales.items()):
-            rows.extend(
-                self._series_rows(
-                    forecast_level="manager_brand",
-                    manager=manager,
-                    brand=brand,
-                    history=history,
-                    end_period=None,
+        for manager, brands in sorted(manager_sales.items()):
+            for brand, history in sorted(brands.items()):
+                rows.extend(
+                    self._series_rows(
+                        forecast_level="manager_brand",
+                        manager=manager,
+                        brand=brand,
+                        history=history,
+                        end_period=None,
+                    )
                 )
-            )
 
         columns = [
             "unique_id",
@@ -200,9 +149,7 @@ class SalesTransformer:
         total_sales: dict[str, dict[pd.Timestamp, float]],
     ) -> pd.Timestamp | None:
         periods = [
-            period
-            for history in total_sales.values()
-            for period in history.keys()
+            period for history in total_sales.values() for period in history.keys()
         ]
         if not periods:
             return None

@@ -28,7 +28,9 @@ class InputScenariosTest(unittest.TestCase):
 
                 self.assertEqual(scenario.rows_in, len(df))
                 self.assertEqual(scenario.period_freq, infer_period_freq(df))
-                self.assertEqual(scenario.has_negative_values, bool((df["value"] < 0).any()))
+                self.assertEqual(
+                    scenario.has_negative_values, bool((df["value"] < 0).any())
+                )
                 self.assertEqual(list(range(len(df))), df["period_index"].to_list())
 
                 if scenario.period_freq is None:
@@ -47,7 +49,9 @@ class InputScenariosTest(unittest.TestCase):
                 self.assertEqual(scenario.rows_after_zero_fill, len(filled))
                 self.assertFalse(filled["value"].isna().any())
 
-                expected_zero_periods = MISSING_PERIODS_WITH_ZERO_FILL.get(scenario.fixture, [])
+                expected_zero_periods = MISSING_PERIODS_WITH_ZERO_FILL.get(
+                    scenario.fixture, []
+                )
                 zero_filled_values = filled.loc[
                     filled["period_start"].isin(expected_zero_periods),
                     "value",
@@ -55,7 +59,9 @@ class InputScenariosTest(unittest.TestCase):
                 self.assertEqual([0.0] * len(expected_zero_periods), zero_filled_values)
 
     def test_missing_periods_are_interpolated_when_configured(self) -> None:
-        scenario = next(item for item in SCENARIOS if item.fixture == "data_missing_periods.txt")
+        scenario = next(
+            item for item in SCENARIOS if item.fixture == "data_missing_periods.txt"
+        )
         df = read_tsv_like(read_fixture(scenario.fixture))
 
         filled, missing_count = fill_missing_periods(df, fill_with_mean=True)
@@ -75,28 +81,42 @@ class InputScenariosTest(unittest.TestCase):
 
         self.assertGreater(float(transformed["log_shift"].iloc[0]), 0.0)
         self.assertTrue(all(math.isfinite(value) for value in transformed["y_log"]))
-        self.assertGreaterEqual(float((transformed["y"] + transformed["log_shift"]).min()), 0.0)
+        self.assertGreaterEqual(
+            float((transformed["y"] + transformed["log_shift"]).min()), 0.0
+        )
 
     def test_iso_period_fixture_uses_contiguous_calendar_periods(self) -> None:
-        scenario = next(item for item in SCENARIOS if item.fixture == "data_iso_periods.txt")
+        scenario = next(
+            item for item in SCENARIOS if item.fixture == "data_iso_periods.txt"
+        )
         df = read_tsv_like(read_fixture(scenario.fixture))
-        expected_periods = pd.date_range(scenario.first_period, scenario.last_period, freq="MS")
+        expected_periods = pd.date_range(
+            scenario.first_period, scenario.last_period, freq="MS"
+        )
 
         self.assertEqual(expected_periods.to_list(), df["period_start"].to_list())
 
     def test_quarterly_fixture_uses_contiguous_quarters_after_fill(self) -> None:
-        scenario = next(item for item in SCENARIOS if item.fixture == "data_quarters.txt")
+        scenario = next(
+            item for item in SCENARIOS if item.fixture == "data_quarters.txt"
+        )
         df = read_tsv_like(read_fixture(scenario.fixture))
 
         filled, missing_count = fill_missing_periods(df, fill_with_mean=False)
 
-        expected_periods = pd.date_range(scenario.first_period, scenario.last_period, freq="QS")
+        expected_periods = pd.date_range(
+            scenario.first_period, scenario.last_period, freq="QS"
+        )
         self.assertEqual(scenario.missing_periods, missing_count)
         self.assertEqual(expected_periods.to_list(), filled["period_start"].to_list())
-        self.assertTrue(set(filled["period_start"].dt.month.to_list()).issubset({1, 4, 7, 10}))
+        self.assertTrue(
+            set(filled["period_start"].dt.month.to_list()).issubset({1, 4, 7, 10})
+        )
 
     def test_ordinal_fixture_keeps_input_order_without_period_filling(self) -> None:
-        scenario = next(item for item in SCENARIOS if item.fixture == "data_ordinal.txt")
+        scenario = next(
+            item for item in SCENARIOS if item.fixture == "data_ordinal.txt"
+        )
         df = read_tsv_like(read_fixture(scenario.fixture))
 
         filled, missing_count = fill_missing_periods(df, fill_with_mean=False)
@@ -110,15 +130,18 @@ class InputScenariosTest(unittest.TestCase):
         class FakeRecognizer:
             def recognize(self, labels: list[str]) -> LabelRecognition:
                 return LabelRecognition(
-                    period_starts=list(pd.date_range("2024-01-01", periods=len(labels), freq="MS")),
+                    period_starts=list(
+                        pd.date_range("2024-01-01", periods=len(labels), freq="MS")
+                    ),
                     period_freq="MS",
                     next_label="2026-01",
                     confidence=0.95,
                 )
 
-        df = read_tsv_like(read_fixture("data_ordinal.txt"), label_recognizer=FakeRecognizer())
+        df = read_tsv_like(
+            read_fixture("data_ordinal.txt"), label_recognizer=FakeRecognizer()
+        )
 
         self.assertEqual("MS", infer_period_freq(df))
         self.assertEqual(pd.Timestamp(2024, 1, 1), df["period_start"].min())
         self.assertEqual("2026-01", df["next_label"].iloc[-1])
-

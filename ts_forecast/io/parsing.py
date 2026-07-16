@@ -21,8 +21,7 @@ class LabelRecognition:
 
 
 class LabelRecognizer(Protocol):
-    def recognize(self, labels: list[str]) -> LabelRecognition:
-        ...
+    def recognize(self, labels: list[str]) -> LabelRecognition: ...
 
 
 def _normalize_year(year: int) -> int:
@@ -141,7 +140,9 @@ def _apply_label_recognition(
     return out
 
 
-def read_tsv_like(raw: str, label_recognizer: LabelRecognizer | None = None) -> pd.DataFrame:
+def read_tsv_like(
+    raw: str, label_recognizer: LabelRecognizer | None = None
+) -> pd.DataFrame:
     rows = []
     sep_re = re.compile(r"\s*(?:\t+| {2,}|[;|])\s*")
     for line in raw.splitlines():
@@ -175,18 +176,27 @@ def read_tsv_like(raw: str, label_recognizer: LabelRecognizer | None = None) -> 
     return df
 
 
-def fill_missing_periods(df: pd.DataFrame, fill_with_mean: bool) -> tuple[pd.DataFrame, int]:
+def fill_missing_periods(
+    df: pd.DataFrame, fill_with_mean: bool
+) -> tuple[pd.DataFrame, int]:
     period_freq = infer_period_freq(df)
     if period_freq is None:
         return df.copy(), 0
 
-    full = pd.date_range(df["period_start"].min(), df["period_start"].max(), freq=period_freq)
+    full = pd.date_range(
+        df["period_start"].min(), df["period_start"].max(), freq=period_freq
+    )
     missing = full.difference(pd.DatetimeIndex(df["period_start"]))
     missing_count = len(missing)
     if missing_count == 0:
         return df.copy(), 0
 
-    out = df.set_index("period_start").reindex(full).rename_axis("period_start").reset_index()
+    out = (
+        df.set_index("period_start")
+        .reindex(full)
+        .rename_axis("period_start")
+        .reset_index()
+    )
     out["period_freq"] = period_freq
     out["label"] = out["label"].fillna(out["period_start"].dt.strftime("%Y-%m"))
     out["next_label"] = _next_period_label(out)
@@ -203,5 +213,7 @@ def add_transforms(df: pd.DataFrame) -> pd.DataFrame:
     out["y"] = out["value"].astype(float)
     log_shift = max(0.0, -float(out["y"].min()))
     out["log_shift"] = log_shift
-    out["y_log"] = (out["y"] + log_shift + 1.0).apply(lambda v: __import__("math").log(v))
+    out["y_log"] = (out["y"] + log_shift + 1.0).apply(
+        lambda v: __import__("math").log(v)
+    )
     return out
