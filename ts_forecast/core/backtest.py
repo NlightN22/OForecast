@@ -22,7 +22,6 @@ from .models import (
     should_use_model,
 )
 
-
 @dataclass
 class BacktestResult:
     periods: List[object]
@@ -30,10 +29,8 @@ class BacktestResult:
     preds_y: Dict[str, np.ndarray]  # model -> y-space preds
     diagnostics: Dict[str, str]
 
-
 def _test_len(n: int, cfg: ForecastConfig) -> int:
     return cfg.test_len_if_ge_48 if n >= 48 else cfg.test_len_else
-
 
 def walk_forward(
     df: pd.DataFrame,
@@ -94,11 +91,7 @@ def walk_forward(
             )
 
         # ARIMA(log) optional
-        if (
-            include_arima
-            and HAS_PMDARIMA
-            and should_use_model(allowed_models, "AutoARIMA_log")
-        ):
+        if include_arima and HAS_PMDARIMA and should_use_model(allowed_models, "AutoARIMA_log"):
             a = arima_forecast_log(
                 ylog_train,
                 m=seasonal_length,
@@ -108,11 +101,7 @@ def walk_forward(
             )
             if a is not None:
                 preds.setdefault("AutoARIMA_log", []).append(safe_expm1(a, log_shift))
-        elif (
-            include_arima
-            and should_use_model(allowed_models, "AutoARIMA_log")
-            and not HAS_PMDARIMA
-        ):
+        elif include_arima and should_use_model(allowed_models, "AutoARIMA_log") and not HAS_PMDARIMA:
             diagnostics.setdefault("AutoARIMA_log", "pmdarima unavailable")
 
         # StatsForecast (y)
@@ -132,9 +121,7 @@ def walk_forward(
 
         # TBATS (y)
         if should_use_model(allowed_models, "TBATS_y"):
-            tb, tb_err = tbats_forecast_y(
-                y_train, cfg.tbats_seasonal_periods, cfg.tbats_min_n
-            )
+            tb, tb_err = tbats_forecast_y(y_train, cfg.tbats_seasonal_periods, cfg.tbats_min_n)
             if tb is not None:
                 preds.setdefault("TBATS_y", []).append(tb)
             else:
@@ -154,7 +141,7 @@ def walk_forward(
         elif tbats_err:
             diagnostics.setdefault(
                 "TBATS_y",
-                f"failed in {tbats_fail_count}/{len(periods)} windows: {tbats_err}",
+                    f"failed in {tbats_fail_count}/{len(periods)} windows: {tbats_err}",
             )
 
     preds_np = {k: np.asarray(v, dtype=float) for k, v in preds.items()}
@@ -176,7 +163,6 @@ def walk_forward(
         preds_y=preds_np,
         diagnostics=diagnostics,
     )
-
 
 def choose_dataset(
     df: pd.DataFrame,

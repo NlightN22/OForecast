@@ -38,8 +38,6 @@ from .models import (
     should_use_model,
 )
 
-__all__ = ["format_result_text", "next_period_label", "run_forecast"]
-
 
 def next_period_label(df: pd.DataFrame) -> str:
     if "next_label" in df.columns and not df["next_label"].empty:
@@ -47,9 +45,7 @@ def next_period_label(df: pd.DataFrame) -> str:
     period_freq = infer_period_freq(df)
     if period_freq is None:
         return "next"
-    next_start = pd.date_range(df["period_start"].max(), periods=2, freq=period_freq)[
-        -1
-    ]
+    next_start = pd.date_range(df["period_start"].max(), periods=2, freq=period_freq)[-1]
     return next_start.strftime("%Y-%m")
 
 
@@ -93,9 +89,7 @@ def forecast_next_period(
             sp = cfg.ets_seasonal_periods if seas is not None else None
             name = f"ETS_log_trend={tr}_seasonal={seas}"
             if should_use_model(allowed_models, name):
-                full_y[name] = safe_expm1(
-                    ets_forecast_log(ylog_train, tr, seas, sp), log_shift
-                )
+                full_y[name] = safe_expm1(ets_forecast_log(ylog_train, tr, seas, sp), log_shift)
 
     # Seasonal naive
     if should_use_model(allowed_models, "SeasonalNaive_y"):
@@ -126,9 +120,7 @@ def forecast_next_period(
 
     # TBATS (y)
     if should_use_model(allowed_models, "TBATS_y"):
-        tb, tb_err = tbats_forecast_y(
-            y_full, cfg.tbats_seasonal_periods, cfg.tbats_min_n
-        )
+        tb, tb_err = tbats_forecast_y(y_full, cfg.tbats_seasonal_periods, cfg.tbats_min_n)
         if tb is not None:
             full_y["TBATS_y"] = tb
         elif HAS_SKTIME and len(y_full) >= cfg.tbats_min_n:
@@ -137,11 +129,7 @@ def forecast_next_period(
     # chosen point forecast
     if chosen_name == "Ensemble_top3_weighted":
         ranked = sorted(
-            (
-                (m, metrics[m]["MAE"])
-                for m in metrics.keys()
-                if m != "Ensemble_top3_weighted"
-            ),
+            ((m, metrics[m]["MAE"]) for m in metrics.keys() if m != "Ensemble_top3_weighted"),
             key=lambda x: x[1],
         )
         top = [m for m, _ in ranked[: cfg.ensemble_topk]]

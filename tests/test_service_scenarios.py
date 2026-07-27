@@ -24,9 +24,7 @@ class ForecastServiceScenariosTest(unittest.TestCase):
 
                 self.assertEqual(scenario.rows_in, result.rows_in)
                 self.assertEqual(scenario.rows_after_zero_fill, result.rows_after_fill)
-                self.assertEqual(
-                    scenario.missing_periods, result.missing_periods_filled
-                )
+                self.assertEqual(scenario.missing_periods, result.missing_periods_filled)
                 self.assertEqual(scenario.next_period, result.next_period)
                 self.assertIn(
                     result.chosen_model,
@@ -38,9 +36,7 @@ class ForecastServiceScenariosTest(unittest.TestCase):
                 self.assert_interval_is_valid(result.intervals)
 
     def test_forecast_service_runs_interpolated_missing_period_scenario(self) -> None:
-        scenario = next(
-            item for item in SCENARIOS if item.fixture == "data_missing_periods.txt"
-        )
+        scenario = next(item for item in SCENARIOS if item.fixture == "data_missing_periods.txt")
 
         result = run_forecast(
             read_fixture(scenario.fixture),
@@ -68,3 +64,4 @@ class ForecastServiceScenariosTest(unittest.TestCase):
         self.assertLessEqual(lo95, lo80)
         self.assertLessEqual(lo80, hi80)
         self.assertLessEqual(hi80, hi95)
+

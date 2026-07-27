@@ -9,6 +9,7 @@ from ts_forecast.core.service import run_forecast
 
 from tests.forecast_scenarios import SCENARIOS, read_fixture
 
+
 RUN_FULL_INTEGRATION = os.environ.get("OFORECAST_RUN_FULL_INTEGRATION") == "1"
 FULL_INTEGRATION_FIXTURE = os.environ.get("OFORECAST_FULL_FIXTURE")
 
@@ -27,9 +28,7 @@ class FullModelIntegrationTest(unittest.TestCase):
         ]
 
         if not scenarios:
-            self.fail(
-                f"No full integration fixture matched: {FULL_INTEGRATION_FIXTURE}"
-            )
+            self.fail(f"No full integration fixture matched: {FULL_INTEGRATION_FIXTURE}")
 
         for scenario in scenarios:
             with self.subTest(scenario=scenario.name):
@@ -47,9 +46,7 @@ class FullModelIntegrationTest(unittest.TestCase):
 
                 self.assertEqual(scenario.rows_in, result.rows_in)
                 self.assertEqual(scenario.rows_after_zero_fill, result.rows_after_fill)
-                self.assertEqual(
-                    scenario.missing_periods, result.missing_periods_filled
-                )
+                self.assertEqual(scenario.missing_periods, result.missing_periods_filled)
                 self.assertEqual(scenario.next_period, result.next_period)
                 self.assertFalse(result.metrics.empty)
                 self.assertFalse(result.backtest.empty)

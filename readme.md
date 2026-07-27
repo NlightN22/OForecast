@@ -1,69 +1,30 @@
 # OForecast
 
-OForecast is a time-series forecasting project with a reusable forecasting
-engine, a web interface, and Excel-oriented sales forecast applications.
-
-## Project Structure
-
-- `ts_forecast` - core forecasting package, CLI, and FastAPI web application.
-- `sales_common` - shared helpers for reading sales workbooks and preparing
-  forecast input.
-- `sales_forecast` - local Excel sales forecast workflow using `ts_forecast`
-  directly.
-- `sales_forecast_api` - Excel sales forecast workflow that sends tasks to a
-  remote OForecast API.
-- `tests` - automated tests for the core service and sales integrations.
-
-Sales forecast documentation lives in `sales_forecast/README.md`.
-
-## Setup
-
-Install the dependencies from the project root:
-
+## Quick start (Docker Compose)
 ```bash
-python -m venv venv
-./venv/bin/python -m pip install --upgrade pip
-./venv/bin/python -m pip install -r requirements.txt
-```
-
-## Web Service
-
-Run the OForecast web application locally:
-
-```bash
-./venv/bin/uvicorn ts_forecast.web.app:app --host 0.0.0.0 --port 8000
-```
-
-Open `http://localhost:8000`.
-
-Docker Compose can run the published web image:
-
-```bash
+wget https://github.com/NlightN22/OForecast/raw/refs/heads/main/docker-compose.yml
 docker compose up -d
 ```
+Then open http://localhost:80.
 
-The published service is then available at `http://localhost:80`.
+## Overview
+OForecast is a small FastAPI service and CLI tool for time series forecasting.
 
-## CLI
+## Features
+- HTTP API for forecasts via FastAPI.
+- CLI mode for local runs.
+- Models based on statsforecast, sktime, tbats, and scikit-learn.
+- Optional filling of missing months by interpolation (default is 0 for gaps).
 
-Run the package CLI when you want to forecast a text time series from the
-command line:
-
+## Run the API
 ```bash
-./venv/bin/python -m ts_forecast.cli.main
+uvicorn ts_forecast.web.app:app --host 0.0.0.0 --port 8000
 ```
 
-## Development
-
-Run the test suite:
-
+## Run the CLI
 ```bash
-./venv/bin/python -m pytest
+python -m ts_forecast.main
 ```
 
-Run syntax checks:
-
-```bash
-./venv/bin/python check_syntax.py
-```
-
+## Data
+The CLI reads `data.txt` from the project root.

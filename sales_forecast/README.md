@@ -26,9 +26,9 @@ Place a copy of `Sales.xlsx` in the application directory you want to run:
 - Local: `sales_forecast/Sales.xlsx`
 - API: `sales_forecast_api/Sales.xlsx`
 
-The repository includes `sales_example.xlsx` with synthetic data. Use it as a
-layout reference or copy it to one of the application directories and rename it
-to `Sales.xlsx` for a test run.
+The repository includes `sales_forecast/sales_example.xlsx` with synthetic
+data. Use it as a layout reference or copy it to one of the application
+directories and rename it to `Sales.xlsx` for a test run.
 
 The default workbook layout is configured as follows:
 
