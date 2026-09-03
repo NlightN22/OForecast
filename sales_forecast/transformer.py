@@ -72,7 +72,9 @@ class SalesTransformer:
 
             month = parse_month(row_label)
             if month is None:
-                if row_label not in IGNORED_COLUMNS:
+                if row_label in IGNORED_COLUMNS:
+                    current_manager = ""
+                else:
                     current_manager = row_label
                 continue
 

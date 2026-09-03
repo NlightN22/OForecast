@@ -165,12 +165,16 @@ class SalesApiTransformer:
         result: list[ManagerBrandRaw] = []
 
         for brand, rows in totals.items():
+            raw = self._rows_to_raw(rows)
+            if not raw:
+                continue
+
             result.append(
                 ManagerBrandRaw(
                     forecast_level="brand_total",
                     manager="All managers",
                     brand=brand,
-                    raw=self._rows_to_raw(rows),
+                    raw=raw,
                 )
             )
 

@@ -152,6 +152,12 @@ class ExcelWriter:
                 startrow=1,
             )
 
+        if totals.empty and details.empty:
+            raise ValueError(
+                "Forecast result has no rows with forecast_level "
+                "'brand_total' or 'manager_brand' to write."
+            )
+
     # -------------------------------------------------------------
 
     @staticmethod

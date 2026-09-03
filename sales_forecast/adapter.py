@@ -127,7 +127,6 @@ class OForecastAdapter:
         return "\n".join(lines)
 
     @staticmethod
-    @staticmethod
     def _series_meta(dataframe: pd.DataFrame) -> dict[str, str]:
         first = dataframe.iloc[0]
         return {
