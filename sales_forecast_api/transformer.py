@@ -28,12 +28,16 @@ class SalesApiTransformer:
         tasks: list[ForecastTask] = []
 
         for brand, rows in totals.items():
+            raw = rows_to_raw(rows, DROP_ZERO_ROWS)
+            if not raw:
+                continue
+
             tasks.append(
                 ForecastTask(
                     forecast_level="brand_total",
                     manager="All managers",
                     brand=brand,
-                    raw=rows_to_raw(rows, DROP_ZERO_ROWS),
+                    raw=raw,
                 )
             )
 
