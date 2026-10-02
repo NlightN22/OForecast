@@ -8,6 +8,7 @@ import pandas as pd
 
 from .backtest import BacktestResult, walk_forward
 from .config import ForecastConfig
+from .ensemble import build_ensemble_or_best
 from .plausibility import PlausibilityResult, check_plausibility, season_backtest_reason
 from .seasonality import SHORT_SEASON_MAX_LEN, SeasonalityInfo, contiguous_month_groups, is_seasonal_model, wape
 
@@ -141,8 +142,12 @@ def _run_deep_season_backtest(
             on_log("plausibility: deep backtest skipped (not enough history for a 24m window)")
         return None
 
-    top3 = [m for m, _ in sorted(all_metrics.items(), key=lambda kv: kv[1]["MAE"])[:DEEP_BACKTEST_TOPK]]
-    if chosen_name not in top3:
+    top3 = [
+        m
+        for m, _ in sorted(all_metrics.items(), key=lambda kv: kv[1]["MAE"])
+        if m != "Ensemble_top3_weighted"
+    ][:DEEP_BACKTEST_TOPK]
+    if chosen_name != "Ensemble_top3_weighted" and chosen_name not in top3:
         top3.append(chosen_name)
     deep_cfg = replace(cfg, test_len_if_ge_48=DEEP_BACKTEST_TEST_LEN, test_len_else=DEEP_BACKTEST_TEST_LEN)
     deep_bt = walk_forward(
@@ -154,9 +159,19 @@ def _run_deep_season_backtest(
         on_log=on_log,
         should_abort=should_abort,
     )
-    if chosen_name not in deep_bt.preds_y:
+    if not deep_bt.preds_y:
         return None
-    reason = season_backtest_reason(deep_bt.periods, deep_bt.actual_y, deep_bt.preds_y[chosen_name], target_month)
+    if chosen_name == "Ensemble_top3_weighted":
+        # The ensemble has no bt.preds_y entry of its own: rebuild it over the
+        # deep window the same way build_ensemble_or_best did for the main backtest.
+        _, deep_pred, _ = build_ensemble_or_best(
+            deep_bt.actual_y, deep_bt.preds_y, topk=DEEP_BACKTEST_TOPK, max_degradation=cfg.ensemble_max_degradation
+        )
+    elif chosen_name in deep_bt.preds_y:
+        deep_pred = deep_bt.preds_y[chosen_name]
+    else:
+        return None
+    reason = season_backtest_reason(deep_bt.periods, deep_bt.actual_y, deep_pred, target_month)
     return f"deep {DEEP_BACKTEST_TEST_LEN}m backtest confirms: {reason}" if reason else None
 
 
