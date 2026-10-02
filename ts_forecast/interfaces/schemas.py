@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from ..core.result import ForecastResult
 
 
 class ForecastRequest(BaseModel):
@@ -35,3 +38,23 @@ class ForecastResponse(BaseModel):
     backtest: List[Dict[str, Any]]
     next_period: str
     intervals: List[Dict[str, Any]]
+    seasonal: bool
+    plausibility_unstable: bool
+    plausibility_reasons: List[str]
+
+
+def forecast_response_from_result(res: "ForecastResult") -> ForecastResponse:
+    return ForecastResponse(
+        rows_in=res.rows_in,
+        rows_after_fill=res.rows_after_fill,
+        missing_periods_filled=res.missing_periods_filled,
+        chosen_dataset=res.chosen_dataset,
+        chosen_model=res.chosen_model,
+        metrics=res.metrics.to_dict(orient="records"),
+        backtest=res.backtest.to_dict(orient="records"),
+        next_period=res.next_period,
+        intervals=[res.intervals],
+        seasonal=res.seasonal,
+        plausibility_unstable=res.plausibility_unstable,
+        plausibility_reasons=res.plausibility_reasons,
+    )
