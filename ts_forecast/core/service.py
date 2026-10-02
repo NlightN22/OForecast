@@ -22,22 +22,10 @@ from .result import (
     ensemble_top_models,
     format_result_text,
 )
-from .models import (
-    winsorize_log,
-    safe_expm1,
-    ses_forecast_log,
-    ets_forecast_log,
-    seasonal_naive_y,
-    arima_forecast_log,
-    HAS_PMDARIMA,
-    HAS_STATSFORECAST,
-    statsforecast_one_step,
-    HAS_SKTIME,
-    tbats_forecast_y,
-    model_catalog,
-    should_use_model,
-)
-from .seasonality import check_plausibility, detect_seasonality
+from .models import HAS_SKTIME, HAS_STATSFORECAST, resolve_allowed_models
+from .point_forecast import forecast_next_period
+from .seasonality import detect_seasonality
+from .season_quality import disqualify_for_short_season, evaluate_plausibility
 
 
 def next_period_label(df: pd.DataFrame) -> str:
@@ -50,97 +38,12 @@ def next_period_label(df: pd.DataFrame) -> str:
     return next_start.strftime("%Y-%m")
 
 
-def forecast_next_period(
-    df: pd.DataFrame,
-    cfg: ForecastConfig,
-    robust: bool,
-    chosen_name: str,
-    metrics: dict,
-    allowed_models: Optional[set[str]] = None,
-    on_log: Optional[Callable[[str], None]] = None,
-) -> tuple[float, float, dict[str, float]]:
-    def log(msg: str) -> None:
-        if on_log is not None:
-            on_log(msg)
-
-    y_full = df["y"].to_numpy(float)
-    ylog_full = df["y_log"].to_numpy(float)
-    log_shift = float(df["log_shift"].iloc[-1])
+def _target_month(df: pd.DataFrame) -> Optional[int]:
     period_freq = infer_period_freq(df)
-    seasonal_length = period_seasonal_length(df)
-    ylog_train = (
-        winsorize_log(ylog_full, cfg.winsor_q_low, cfg.winsor_q_high)
-        if robust
-        else ylog_full
-    )
-
-    # produce single-step forecasts for all models (needed for ensemble)
-    full_y = {}
-
-    # SES
-    if should_use_model(allowed_models, "SES_log"):
-        full_y["SES_log"] = safe_expm1(ses_forecast_log(ylog_train), log_shift)
-
-    # ETS grid
-    use_seasonal = len(ylog_train) >= cfg.ets_seasonal_min_n
-    for tr in cfg.ets_trends:
-        for seas in cfg.ets_seasonals:
-            if seas is not None and not use_seasonal:
-                continue
-            sp = cfg.ets_seasonal_periods if seas is not None else None
-            name = f"ETS_log_trend={tr}_seasonal={seas}"
-            if should_use_model(allowed_models, name):
-                full_y[name] = safe_expm1(ets_forecast_log(ylog_train, tr, seas, sp), log_shift)
-
-    # Seasonal naive
-    if should_use_model(allowed_models, "SeasonalNaive_y"):
-        full_y["SeasonalNaive_y"] = seasonal_naive_y(y_full, seasonal_length)
-
-    # ARIMA
-    if HAS_PMDARIMA and should_use_model(allowed_models, "AutoARIMA_log"):
-        a = arima_forecast_log(
-            ylog_train,
-            seasonal_length,
-            cfg.arima_stepwise,
-            cfg.arima_max_pq,
-            cfg.arima_max_pq_seas,
-        )
-        if a is not None:
-            full_y["AutoARIMA_log"] = safe_expm1(a, log_shift)
-
-    # StatsForecast (y)
-    sf = statsforecast_one_step(
-        df["period_start"],
-        y_full,
-        seasonal_length,
-        freq=period_freq,
-        allowed_models=allowed_models,
-    )
-    for name, value in sf.items():
-        full_y[name] = value
-
-    # TBATS (y)
-    if should_use_model(allowed_models, "TBATS_y"):
-        tb, tb_err = tbats_forecast_y(y_full, cfg.tbats_seasonal_periods, cfg.tbats_min_n)
-        if tb is not None:
-            full_y["TBATS_y"] = tb
-        elif HAS_SKTIME and len(y_full) >= cfg.tbats_min_n:
-            log(f"sktime.tbats: failed ({tb_err})")
-
-    # chosen point forecast
-    if chosen_name == "Ensemble_top3_weighted":
-        ranked = sorted(
-            ((m, metrics[m]["MAE"]) for m in metrics.keys() if m != "Ensemble_top3_weighted"),
-            key=lambda x: x[1],
-        )
-        top = [m for m, _ in ranked[: cfg.ensemble_topk]]
-        w = np.array([1.0 / max(metrics[m]["MAE"], 1e-9) for m in top], float)
-        w = w / w.sum()
-        point = float(sum(wi * full_y[m] for wi, m in zip(w, top)))
-    else:
-        point = float(full_y[chosen_name])
-
-    return point, float(np.log1p(max(point + log_shift, 0.0))), full_y
+    if period_freq is None:
+        return None
+    next_start = pd.date_range(df["period_start"].max(), periods=2, freq=period_freq)[-1]
+    return int(next_start.month)
 
 
 def run_forecast(
@@ -177,35 +80,7 @@ def run_forecast(
     log("transforms: ok")
     check_abort()
 
-    all_models = set(model_catalog(cfg.ets_trends, cfg.ets_seasonals))
-    if use_all or not models:
-        allowed_models = None
-    else:
-        requested = [m for m in models if m in all_models]
-        unknown = [m for m in (models or []) if m not in all_models]
-        if unknown:
-            log(f"models: ignoring unknown: {', '.join(unknown)}")
-        if not requested:
-            log("models: none selected, using all")
-            allowed_models = None
-        else:
-            allowed_models = set(requested)
-
-    if allowed_models is not None:
-        if not HAS_PMDARIMA and "AutoARIMA_log" in allowed_models:
-            allowed_models.discard("AutoARIMA_log")
-            log("models: AutoARIMA_log skipped (pmdarima unavailable)")
-        if not HAS_STATSFORECAST:
-            sf_removed = {m for m in allowed_models if m.startswith("SF_")}
-            if sf_removed:
-                allowed_models.difference_update(sf_removed)
-                log("models: statsforecast models skipped (unavailable)")
-        if not HAS_SKTIME and "TBATS_y" in allowed_models:
-            allowed_models.discard("TBATS_y")
-            log("models: TBATS_y skipped (sktime unavailable)")
-        if not allowed_models:
-            log("models: no available selections, using all")
-            allowed_models = None
+    allowed_models = resolve_allowed_models(cfg.ets_trends, cfg.ets_seasonals, models, use_all, on_log=log)
 
     log("backtest: start")
     if not HAS_STATSFORECAST:
@@ -247,6 +122,18 @@ def run_forecast(
     if "Ensemble_top3_weighted" in all_metrics:
         ensemble_models = ensemble_top_models(all_metrics, cfg.ensemble_topk)
 
+    seasonality = detect_seasonality(df, bt.actual_y, bt.preds_y)
+    target_month = _target_month(df)
+
+    short_season_reason: Optional[str] = None
+    if target_month is not None and seasonality.confirmed:
+        chosen_name, short_season_reason = disqualify_for_short_season(
+            seasonality, target_month, bt, chosen_name, all_metrics
+        )
+        if short_season_reason:
+            log(f"plausibility: {short_season_reason}")
+            chosen_bt_forecast = bt.preds_y.get(chosen_name, chosen_bt_forecast)
+
     bt_df = backtest_table(bt.periods, bt.actual_y, chosen_bt_forecast)
 
     # errors in log1p space for bootstrap intervals
@@ -282,21 +169,20 @@ def run_forecast(
     metrics_df = pd.DataFrame(all_metrics).T.sort_values("MAE")
 
     # Seasonality-aware plausibility check (isolated from model selection/ranking above).
-    seasonality = detect_seasonality(df, bt.actual_y, bt.preds_y)
-    period_freq = infer_period_freq(df)
-    target_month = None
-    if period_freq is not None:
-        next_start = pd.date_range(df["period_start"].max(), periods=2, freq=period_freq)[-1]
-        target_month = int(next_start.month)
     if target_month is not None:
-        plausibility = check_plausibility(
-            point_forecast=point_y,
-            chosen_name=chosen_name,
-            target_month=target_month,
-            df=df,
-            seasonality=seasonality,
-            full_y=full_y,
-            all_metrics=all_metrics,
+        plausibility = evaluate_plausibility(
+            df,
+            cfg,
+            chosen_name,
+            short_season_reason,
+            target_month,
+            seasonality,
+            full_y,
+            all_metrics,
+            bt,
+            point_y,
+            on_log=log,
+            should_abort=should_abort,
         )
         if plausibility.unstable:
             log(f"plausibility: unstable ({'; '.join(plausibility.reasons)})")

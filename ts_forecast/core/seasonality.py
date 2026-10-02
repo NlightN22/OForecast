@@ -14,10 +14,7 @@ SEASON_MONTH_RATIO_THRESHOLD = 1.3
 SCALE_RATIO_MIN = 0.5
 SCALE_RATIO_MAX = 2.0
 
-SEASONAL_INSTABILITY_THRESHOLD = 0.35
-NON_SEASONAL_INSTABILITY_THRESHOLD = 0.25
-NON_SEASONAL_BIAS_THRESHOLD = 0.15
-MIN_CONFIRMING_SEASONAL_MODELS = 2
+SHORT_SEASON_MAX_LEN = 3
 
 
 def wape(y_true, y_pred) -> float:
@@ -70,14 +67,39 @@ def _calendar_month_repeats(df: pd.DataFrame) -> set[int]:
     }
 
 
+def contiguous_month_groups(months: set[int]) -> list[list[int]]:
+    """Group calendar months into contiguous (circular) runs, e.g. {11,12,1} -> [[11,12,1]]."""
+    if not months:
+        return []
+    visited: set[int] = set()
+    groups: list[list[int]] = []
+    for m in sorted(months):
+        if m in visited:
+            continue
+        group = [m]
+        visited.add(m)
+        nxt = m % 12 + 1
+        while nxt in months and nxt not in visited:
+            group.append(nxt)
+            visited.add(nxt)
+            nxt = nxt % 12 + 1
+        prv = (m - 2) % 12 + 1
+        while prv in months and prv not in visited:
+            group.insert(0, prv)
+            visited.add(prv)
+            prv = (prv - 2) % 12 + 1
+        groups.append(group)
+    return groups
+
+
 def detect_seasonality(
     df: pd.DataFrame,
     bt_actual: np.ndarray,
     bt_preds: dict[str, np.ndarray],
 ) -> SeasonalityInfo:
     """Cheap, aggregate-only seasonality check (no extra model training):
-    reuses the existing 12-month rolling backtest predictions already
-    computed for model selection."""
+    reuses the existing rolling backtest predictions already computed for
+    model selection."""
     if len(df) < SEASONALITY_MIN_HISTORY:
         return SeasonalityInfo(False, [f"history<{SEASONALITY_MIN_HISTORY}m"])
 
@@ -139,7 +161,12 @@ def compute_seasonal_anchor(df: pd.DataFrame, target_month: int) -> SeasonalAnch
     anchor_raw = float(np.median(values)) if len(values) == 3 else float(np.mean(values))
 
     df_sorted = df.sort_values("period_start")
-    last3 = df_sorted.tail(3)
+    current_year_rows = df_sorted[df_sorted["period_start"].dt.year == last_date.year]
+    last3 = current_year_rows.tail(3)
+    if len(last3) < 3:
+        # Not enough closed months in the current calendar year yet (e.g. early January):
+        # fall back to the last 3 available months regardless of year boundary.
+        last3 = df_sorted.tail(3)
     ratios = []
     if len(last3) == 3:
         cur_mean = float(last3["y"].mean())
@@ -161,87 +188,3 @@ def compute_seasonal_anchor(df: pd.DataFrame, target_month: int) -> SeasonalAnch
     scale_ratio = float(np.clip(scale_ratio, SCALE_RATIO_MIN, SCALE_RATIO_MAX))
 
     return SeasonalAnchor(True, anchor_raw, scale_ratio, anchor_raw * scale_ratio)
-
-
-@dataclass
-class PlausibilityResult:
-    unstable: bool
-    reasons: list[str]
-    seasonal: bool
-    reference_value: Optional[float] = None
-    deviation_pct: Optional[float] = None
-    seasonal_anchor_raw: Optional[float] = None
-    seasonal_scale_ratio: Optional[float] = None
-
-
-def check_plausibility(
-    point_forecast: float,
-    chosen_name: str,
-    target_month: int,
-    df: pd.DataFrame,
-    seasonality: SeasonalityInfo,
-    full_y: dict[str, float],
-    all_metrics: dict,
-) -> PlausibilityResult:
-    is_seasonal_month = seasonality.confirmed and target_month in seasonality.seasonal_months
-
-    if is_seasonal_month:
-        anchor = compute_seasonal_anchor(df, target_month)
-        if not anchor.available:
-            return PlausibilityResult(False, [f"no seasonal anchor: {anchor.reason}"], seasonal=False)
-
-        ref = anchor.anchor_adjusted
-        reasons: list[str] = []
-        deviation = abs(point_forecast - ref) / ref if ref else 0.0
-        if deviation > SEASONAL_INSTABILITY_THRESHOLD:
-            reasons.append(
-                f"forecast deviates {deviation:.1%} from adjusted seasonal anchor "
-                f"(>{SEASONAL_INSTABILITY_THRESHOLD:.0%})"
-            )
-
-        seasonal_model_names = [m for m in full_y if is_seasonal_model(m)]
-        direction_up = point_forecast >= ref
-        agreeing = sum(1 for m in seasonal_model_names if (full_y[m] >= ref) == direction_up)
-        if len(seasonal_model_names) >= MIN_CONFIRMING_SEASONAL_MODELS and agreeing < MIN_CONFIRMING_SEASONAL_MODELS:
-            reasons.append(
-                f"only {agreeing}/{len(seasonal_model_names)} seasonal models confirm forecast direction "
-                f"(need >={MIN_CONFIRMING_SEASONAL_MODELS})"
-            )
-
-        return PlausibilityResult(
-            unstable=bool(reasons),
-            reasons=reasons,
-            seasonal=True,
-            reference_value=ref,
-            deviation_pct=deviation * 100,
-            seasonal_anchor_raw=anchor.anchor_raw,
-            seasonal_scale_ratio=anchor.scale_ratio,
-        )
-
-    candidate_vals = [v for m, v in full_y.items() if m != "Ensemble_top3_weighted"]
-    if not candidate_vals:
-        return PlausibilityResult(False, ["no candidate models"], seasonal=False)
-
-    ref = float(np.median(candidate_vals))
-    reasons = []
-    deviation = abs(point_forecast - ref) / ref if ref else 0.0
-    if deviation > NON_SEASONAL_INSTABILITY_THRESHOLD:
-        reasons.append(
-            f"forecast deviates {deviation:.1%} from median of candidate models "
-            f"(>{NON_SEASONAL_INSTABILITY_THRESHOLD:.0%})"
-        )
-
-    chosen_metrics = all_metrics.get(chosen_name, {})
-    bias = chosen_metrics.get("MAPE")
-    if bias is not None and not np.isnan(bias) and bias > NON_SEASONAL_BIAS_THRESHOLD * 100:
-        reasons.append(
-            f"chosen model absolute bias {bias:.1f}% > {NON_SEASONAL_BIAS_THRESHOLD:.0%}"
-        )
-
-    return PlausibilityResult(
-        unstable=bool(reasons),
-        reasons=reasons,
-        seasonal=False,
-        reference_value=ref,
-        deviation_pct=deviation * 100,
-    )
