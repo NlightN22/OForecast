@@ -37,6 +37,7 @@ from .models import (
     model_catalog,
     should_use_model,
 )
+from .seasonality import check_plausibility, detect_seasonality
 
 
 def next_period_label(df: pd.DataFrame) -> str:
@@ -57,7 +58,7 @@ def forecast_next_period(
     metrics: dict,
     allowed_models: Optional[set[str]] = None,
     on_log: Optional[Callable[[str], None]] = None,
-) -> tuple[float, float]:
+) -> tuple[float, float, dict[str, float]]:
     def log(msg: str) -> None:
         if on_log is not None:
             on_log(msg)
@@ -139,7 +140,7 @@ def forecast_next_period(
     else:
         point = float(full_y[chosen_name])
 
-    return point, float(np.log1p(max(point + log_shift, 0.0)))
+    return point, float(np.log1p(max(point + log_shift, 0.0))), full_y
 
 
 def run_forecast(
@@ -256,7 +257,7 @@ def run_forecast(
 
     # point forecast + intervals for the next period
     log("intervals: start")
-    point_y, point_log = forecast_next_period(
+    point_y, point_log, full_y = forecast_next_period(
         df,
         cfg,
         robust,
@@ -280,6 +281,31 @@ def run_forecast(
 
     metrics_df = pd.DataFrame(all_metrics).T.sort_values("MAE")
 
+    # Seasonality-aware plausibility check (isolated from model selection/ranking above).
+    seasonality = detect_seasonality(df, bt.actual_y, bt.preds_y)
+    period_freq = infer_period_freq(df)
+    target_month = None
+    if period_freq is not None:
+        next_start = pd.date_range(df["period_start"].max(), periods=2, freq=period_freq)[-1]
+        target_month = int(next_start.month)
+    if target_month is not None:
+        plausibility = check_plausibility(
+            point_forecast=point_y,
+            chosen_name=chosen_name,
+            target_month=target_month,
+            df=df,
+            seasonality=seasonality,
+            full_y=full_y,
+            all_metrics=all_metrics,
+        )
+        if plausibility.unstable:
+            log(f"plausibility: unstable ({'; '.join(plausibility.reasons)})")
+        else:
+            log("plausibility: ok")
+    else:
+        plausibility = None
+        log("plausibility: skipped (non-calendar series)")
+
     log("done")
     return ForecastResult(
         rows_in=len(df0),
@@ -292,4 +318,7 @@ def run_forecast(
         backtest=bt_df,
         next_period=next_period,
         intervals=intervals,
+        seasonal=seasonality.confirmed,
+        plausibility_unstable=bool(plausibility.unstable) if plausibility else False,
+        plausibility_reasons=plausibility.reasons if plausibility else [],
     )
