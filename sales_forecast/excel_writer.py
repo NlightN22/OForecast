@@ -17,7 +17,6 @@ from openpyxl.styles import Alignment
 
 from openpyxl.utils import get_column_letter
 
-
 HEADER_FILL = PatternFill(
     fill_type="solid",
     fgColor="4472C4",
@@ -32,15 +31,10 @@ TITLE_FILL = PatternFill(fill_type="solid", fgColor="1F4E78")
 TITLE_FONT = Font(color="FFFFFF", bold=True, size=14)
 
 THIN_BORDER = Border(
-
     left=Side(style="thin"),
-
     right=Side(style="thin"),
-
     top=Side(style="thin"),
-
     bottom=Side(style="thin"),
-
 )
 
 
@@ -173,10 +167,7 @@ class ExcelWriter:
             "missing_periods_filled",
         }
 
-        headers = {
-            cell.column: str(cell.value)
-            for cell in ws[2]
-        }
+        headers = {cell.column: str(cell.value) for cell in ws[2]}
 
         for column_index, header in headers.items():
             if header not in numeric_columns:
@@ -194,10 +185,7 @@ class ExcelWriter:
 
     @staticmethod
     def _format_dates(ws) -> None:
-        headers = {
-            cell.column: str(cell.value)
-            for cell in ws[2]
-        }
+        headers = {cell.column: str(cell.value) for cell in ws[2]}
 
         for column_index, header in headers.items():
             if header != "next_period":
@@ -219,9 +207,7 @@ class ExcelWriter:
     def _autosize(ws) -> None:
         for column in ws.columns:
             max_length = 0
-            column_letter = get_column_letter(
-                column[0].column
-            )
+            column_letter = get_column_letter(column[0].column)
 
             for cell in column:
                 value = "" if cell.value is None else str(cell.value)
@@ -269,12 +255,9 @@ class ExcelWriter:
         except PermissionError:
 
             raise PermissionError(
-                f"File '{filename}' is open in Excel. "
-                "Close it and try again."
+                f"File '{filename}' is open in Excel. " "Close it and try again."
             )
 
         except Exception as exc:
 
-            raise RuntimeError(
-                f"Excel save error:\n{exc}"
-            ) from exc
+            raise RuntimeError(f"Excel save error:\n{exc}") from exc

@@ -6,6 +6,5 @@ statsforecast>=1.7
 sktime>=0.28
 tbats
 scikit-learn<1.6
-statsmodels
 numpy<2
 dateparser

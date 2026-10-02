@@ -42,41 +42,29 @@ def main():
 
     if not Path(INPUT_FILE).exists():
 
-        raise FileNotFoundError(
-            f"File not found:\n{INPUT_FILE}"
-        )
+        raise FileNotFoundError(f"File not found:\n{INPUT_FILE}")
 
     print("Reading Excel...")
 
     parser = ExcelParser()
 
-    raw_df = parser.read(
-        INPUT_FILE
-    )
+    raw_df = parser.read(INPUT_FILE)
 
-    print(
-        f"Rows: {len(raw_df)}"
-    )
+    print(f"Rows: {len(raw_df)}")
 
     print("Transforming data...")
 
     transformer = SalesTransformer()
 
-    forecast_df = transformer.run(
-        raw_df
-    )
+    forecast_df = transformer.run(raw_df)
 
-    print(
-        f"Series prepared: {forecast_df['unique_id'].nunique()}"
-    )
+    print(f"Series prepared: {forecast_df['unique_id'].nunique()}")
 
     print("Calculating forecast...")
 
     adapter = OForecastAdapter()
 
-    result = adapter.forecast(
-        forecast_df
-    )
+    result = adapter.forecast(forecast_df)
 
     print("Saving Excel...")
 
@@ -93,13 +81,9 @@ def main():
 
     print("Done.")
 
-    print(
-        f"Runtime: {elapsed:.2f} sec."
-    )
+    print(f"Runtime: {elapsed:.2f} sec.")
 
-    print(
-        f"File saved:\n{OUTPUT_FILE}"
-    )
+    print(f"File saved:\n{OUTPUT_FILE}")
 
     print("-" * 60)
 

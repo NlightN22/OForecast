@@ -7,7 +7,6 @@ from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-
 TITLE_FILL = PatternFill(fill_type="solid", fgColor="1F4E78")
 HEADER_FILL = PatternFill(fill_type="solid", fgColor="4472C4")
 TITLE_FONT = Font(color="FFFFFF", bold=True, size=14)
@@ -62,6 +61,8 @@ class ExcelWriter:
                 "Model": response.get("chosen_model"),
                 "Dataset": response.get("chosen_dataset"),
                 "Rows In": response.get("rows_in"),
+                "Status": response.get("status", "ok"),
+                "Error": response.get("error", ""),
             }
 
             if item["forecast_level"] == "brand_total":
@@ -103,8 +104,12 @@ class ExcelWriter:
                 cell.border = THIN_BORDER
 
         numeric_headers = {
-            "Forecast", "Lower 80%", "Upper 80%",
-            "Lower 95%", "Upper 95%", "Rows In",
+            "Forecast",
+            "Lower 80%",
+            "Upper 80%",
+            "Lower 95%",
+            "Upper 95%",
+            "Rows In",
         }
         for cell in sheet[2]:
             if cell.value in numeric_headers:
@@ -121,7 +126,5 @@ class ExcelWriter:
             width = max(len(str(cell.value or "")) for cell in column) + 2
             sheet.column_dimensions[letter].width = min(width, 45)
 
-        sheet.auto_filter.ref = (
-            f"A2:{get_column_letter(last_column)}{sheet.max_row}"
-        )
+        sheet.auto_filter.ref = f"A2:{get_column_letter(last_column)}{sheet.max_row}"
         sheet.freeze_panes = "A3"
