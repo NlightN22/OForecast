@@ -73,7 +73,9 @@ def _run_job(run_id: str, payload: ForecastRequest) -> None:
 @router.post("/forecast/jobs", status_code=202)
 def create_forecast_job(payload: ForecastRequest, response: Response) -> dict:
     _sweep_finished_jobs()
-    sweep_stale_cancel_events()
+    with JOBS_LOCK:
+        running_ids = frozenset(rid for rid, job in JOBS.items() if job.status == "running")
+    sweep_stale_cancel_events(running_ids)
     run_id = payload.run_id or str(uuid.uuid4())
 
     with JOBS_LOCK:

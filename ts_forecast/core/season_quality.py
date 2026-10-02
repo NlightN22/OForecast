@@ -9,13 +9,14 @@ import pandas as pd
 from .backtest import BacktestResult, walk_forward
 from .config import ForecastConfig
 from .plausibility import PlausibilityResult, check_plausibility, season_backtest_reason
-from .seasonality import SeasonalityInfo, contiguous_month_groups, is_seasonal_model, wape
+from .seasonality import SHORT_SEASON_MAX_LEN, SeasonalityInfo, contiguous_month_groups, is_seasonal_model, wape
 
 SHORT_SEASON_DEGRADATION_FACTOR = 1.5
 
 DEEP_BACKTEST_MODEL_DISAGREEMENT = 0.25
 DEEP_BACKTEST_SEASONAL_VS_BASE = 0.35
 DEEP_BACKTEST_TEST_LEN = 24
+DEEP_BACKTEST_MIN_TRAIN = 12
 DEEP_BACKTEST_TOPK = 3
 CONTRADICTORY_HISTORY_CV = 0.5
 
@@ -30,12 +31,18 @@ def disqualify_for_short_season(
     """Section 5: a model that forecasts the year well on average but
     systematically misses the entry/exit of a short (2-3 month) season
     must not be chosen for that season's months."""
-    groups = [g for g in contiguous_month_groups(seasonality.seasonal_months) if len(g) <= 3]
+    groups = [
+        g
+        for g in contiguous_month_groups(seasonality.seasonal_months)
+        if 1 < len(g) <= SHORT_SEASON_MAX_LEN
+    ]
     group = next((g for g in groups if target_month in g), None)
     if group is None or chosen_name not in bt.preds_y:
         return chosen_name, None
 
-    boundary_months = {group[0], group[-1] % 12 + 1}
+    pre_month = (group[0] - 2) % 12 + 1
+    exit_month = group[-1] % 12 + 1
+    boundary_months = {pre_month, group[0], exit_month}
     idx_boundary = [i for i, p in enumerate(bt.periods) if pd.Timestamp(p).month in boundary_months]
     if not idx_boundary:
         return chosen_name, None
@@ -122,19 +129,20 @@ def _run_deep_season_backtest(
 ) -> Optional[str]:
     """Section 6: deeper 24-month backtest over only the top-3 models,
     run only when _should_run_deep_backtest() triggers it."""
+    if len(df) < DEEP_BACKTEST_TEST_LEN + DEEP_BACKTEST_MIN_TRAIN:
+        if on_log is not None:
+            on_log("plausibility: deep backtest skipped (not enough history for a 24m window)")
+        return None
+
     top3 = [m for m, _ in sorted(all_metrics.items(), key=lambda kv: kv[1]["MAE"])[:DEEP_BACKTEST_TOPK]]
     if chosen_name not in top3:
         top3.append(chosen_name)
-    deep_cfg = replace(
-        cfg,
-        test_len_if_ge_48=DEEP_BACKTEST_TEST_LEN,
-        test_len_else=min(DEEP_BACKTEST_TEST_LEN, max(len(df) - 1, 1)),
-    )
+    deep_cfg = replace(cfg, test_len_if_ge_48=DEEP_BACKTEST_TEST_LEN, test_len_else=DEEP_BACKTEST_TEST_LEN)
     deep_bt = walk_forward(
         df,
         deep_cfg,
         robust=False,
-        include_arima=chosen_name == "AutoARIMA_log",
+        include_arima="AutoARIMA_log" in top3,
         allowed_models=set(top3),
         on_log=on_log,
         should_abort=should_abort,
@@ -149,6 +157,7 @@ def evaluate_plausibility(
     df: pd.DataFrame,
     cfg: ForecastConfig,
     chosen_name: str,
+    chosen_bt_forecast: np.ndarray,
     short_season_reason: Optional[str],
     target_month: int,
     seasonality: SeasonalityInfo,
@@ -161,7 +170,13 @@ def evaluate_plausibility(
 ) -> PlausibilityResult:
     """Full plausibility pipeline for one forecast: base checks (section 4),
     the short-season disqualification reason (section 5), and the triggered
-    deep-backtest confirmation (section 6)."""
+    deep-backtest confirmation (section 6).
+
+    `chosen_bt_forecast` is the backtest series for whatever was actually
+    chosen (a single model's own bt.preds_y entry, or the ensemble's blended
+    series, which never has its own bt.preds_y key) - using bt.preds_y.get()
+    here would silently skip the backtest-based checks for ensemble results.
+    """
     plausibility = check_plausibility(
         point_forecast=point_y,
         chosen_name=chosen_name,
@@ -172,7 +187,7 @@ def evaluate_plausibility(
         all_metrics=all_metrics,
         bt_periods=bt.periods,
         bt_actual=bt.actual_y,
-        bt_chosen_pred=bt.preds_y.get(chosen_name),
+        bt_chosen_pred=chosen_bt_forecast,
     )
     if short_season_reason:
         plausibility.unstable = True

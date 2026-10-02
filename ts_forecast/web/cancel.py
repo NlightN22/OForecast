@@ -26,13 +26,25 @@ def clear_cancel_event(run_id: str) -> None:
         CANCEL_CREATED_AT.pop(run_id, None)
 
 
-def sweep_stale_cancel_events(max_age_seconds: float = CANCEL_TTL_SECONDS) -> None:
+def sweep_stale_cancel_events(
+    active_run_ids: frozenset[str] = frozenset(), max_age_seconds: float = CANCEL_TTL_SECONDS
+) -> None:
     """Drop cancel events that were created (e.g. by a cancel request racing
     ahead of its job, or an orphan cancel for an unknown run_id) and never
-    cleared by a finished worker, so CANCEL_EVENTS does not grow unbounded."""
+    cleared by a finished worker, so CANCEL_EVENTS does not grow unbounded.
+
+    `active_run_ids` must list every run_id with a worker still running, so a
+    long-running job's event is never swept out from under it: the worker
+    thread holds its Event by direct reference, and a cancel request that
+    arrives after the sweep would otherwise create a new, unobserved Event.
+    """
     now = time.monotonic()
     with CANCEL_LOCK:
-        stale = [rid for rid, created in CANCEL_CREATED_AT.items() if now - created > max_age_seconds]
+        stale = [
+            rid
+            for rid, created in CANCEL_CREATED_AT.items()
+            if rid not in active_run_ids and now - created > max_age_seconds
+        ]
         for rid in stale:
             CANCEL_EVENTS.pop(rid, None)
             CANCEL_CREATED_AT.pop(rid, None)

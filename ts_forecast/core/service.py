@@ -174,6 +174,7 @@ def run_forecast(
             df,
             cfg,
             chosen_name,
+            chosen_bt_forecast,
             short_season_reason,
             target_month,
             seasonality,
