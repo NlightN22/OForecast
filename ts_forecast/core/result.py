@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -18,6 +18,9 @@ class ForecastResult:
     backtest: pd.DataFrame
     next_period: str
     intervals: dict[str, float]
+    seasonal: bool = False
+    plausibility_unstable: bool = False
+    plausibility_reasons: list[str] = field(default_factory=list)
 
 
 def format_period(value: object) -> str:
@@ -73,6 +76,10 @@ def format_result_text(res: ForecastResult) -> str:
         "=== FINAL_FORECAST_NEXT_PERIOD ===",
         f"next_period={res.next_period}",
         format_table(res.intervals, index=False),
+        "",
+        "=== PLAUSIBILITY ===",
+        f"seasonal={res.seasonal} unstable={res.plausibility_unstable}",
+    ] + ([f"reasons: {'; '.join(res.plausibility_reasons)}"] if res.plausibility_reasons else []) + [
         "",
     ]
     return "\n".join(parts)

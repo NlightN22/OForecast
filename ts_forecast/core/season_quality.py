@@ -1,0 +1,237 @@
+from __future__ import annotations
+
+from dataclasses import replace
+from typing import Callable, Optional
+
+import numpy as np
+import pandas as pd
+
+from .backtest import BacktestResult, walk_forward
+from .config import ForecastConfig
+from .ensemble import build_ensemble_or_best
+from .plausibility import PlausibilityResult, check_plausibility, season_backtest_reason
+from .seasonality import SHORT_SEASON_MAX_LEN, SeasonalityInfo, contiguous_month_groups, is_seasonal_model, wape
+
+SHORT_SEASON_DEGRADATION_FACTOR = 1.5
+
+DEEP_BACKTEST_MODEL_DISAGREEMENT = 0.25
+DEEP_BACKTEST_SEASONAL_VS_BASE = 0.35
+DEEP_BACKTEST_TEST_LEN = 24
+DEEP_BACKTEST_MIN_TRAIN = 12
+DEEP_BACKTEST_TOPK = 3
+CONTRADICTORY_HISTORY_CV = 0.5
+
+
+def disqualify_for_short_season(
+    seasonality: SeasonalityInfo,
+    target_month: int,
+    bt: BacktestResult,
+    chosen_name: str,
+    chosen_bt_forecast: np.ndarray,
+    all_metrics: dict,
+) -> tuple[str, Optional[str]]:
+    """Section 5: a model that forecasts the year well on average but
+    systematically misses the entry/exit of a short (2-3 month) season
+    must not be chosen for that season's months.
+
+    `chosen_bt_forecast` is the backtest series for whatever was actually
+    chosen, including the ensemble blend (which has no bt.preds_y entry of
+    its own) - looking it up via bt.preds_y[chosen_name] would silently skip
+    this disqualification whenever the ensemble was selected.
+    """
+    groups = [
+        g
+        for g in contiguous_month_groups(seasonality.seasonal_months)
+        if 1 < len(g) <= SHORT_SEASON_MAX_LEN
+    ]
+    group = next((g for g in groups if target_month in g), None)
+    if group is None:
+        return chosen_name, None
+
+    pre_month = (group[0] - 2) % 12 + 1
+    exit_month = group[-1] % 12 + 1
+    boundary_months = {pre_month, group[0], exit_month}
+    idx_boundary = [i for i, p in enumerate(bt.periods) if pd.Timestamp(p).month in boundary_months]
+    if not idx_boundary:
+        return chosen_name, None
+
+    def boundary_wape(pred: np.ndarray) -> tuple[float, float]:
+        return (
+            wape(bt.actual_y[idx_boundary], pred[idx_boundary]),
+            wape(bt.actual_y, pred),
+        )
+
+    chosen_boundary, chosen_overall = boundary_wape(chosen_bt_forecast)
+    if (
+        np.isnan(chosen_boundary)
+        or np.isnan(chosen_overall)
+        or chosen_overall == 0
+        or chosen_boundary <= chosen_overall * SHORT_SEASON_DEGRADATION_FACTOR
+    ):
+        return chosen_name, None
+
+    ranked = sorted(
+        (m for m in all_metrics if m != chosen_name and m in bt.preds_y),
+        key=lambda m: all_metrics[m]["MAE"],
+    )
+    for alt in ranked:
+        alt_boundary, alt_overall = boundary_wape(bt.preds_y[alt])
+        if np.isnan(alt_boundary) or np.isnan(alt_overall) or alt_overall == 0:
+            continue
+        if alt_boundary <= alt_overall * SHORT_SEASON_DEGRADATION_FACTOR:
+            return alt, (
+                f"{chosen_name} disqualified: season entry/exit WAPE {chosen_boundary:.1f}% "
+                f"vs {chosen_overall:.1f}% overall; replaced with {alt}"
+            )
+
+    return chosen_name, (
+        f"{chosen_name} degrades at season entry/exit (WAPE {chosen_boundary:.1f}% "
+        f"vs {chosen_overall:.1f}% overall) but no better alternative is available"
+    )
+
+
+def calendar_month_history_is_contradictory(df: pd.DataFrame, target_month: int) -> bool:
+    values = df.loc[df["period_start"].dt.month == target_month, "y"].to_numpy(float)
+    if len(values) < 3:
+        return False
+    mean = float(np.mean(values))
+    if mean == 0:
+        return False
+    cv = float(np.std(values) / abs(mean))
+    return cv > CONTRADICTORY_HISTORY_CV
+
+
+def _should_run_deep_backtest(
+    seasonal_model_values: list[float],
+    seasonal_forecast: Optional[float],
+    nonseasonal_ref: Optional[float],
+    short_season_flagged: bool,
+    history_contradictory: bool,
+) -> tuple[bool, list[str]]:
+    reasons: list[str] = []
+    if len(seasonal_model_values) >= 2:
+        median_val = float(np.median(seasonal_model_values))
+        if median_val:
+            spread = (max(seasonal_model_values) - min(seasonal_model_values)) / abs(median_val)
+            if spread > DEEP_BACKTEST_MODEL_DISAGREEMENT:
+                reasons.append(f"seasonal models disagree by {spread:.1%}")
+    if seasonal_forecast and nonseasonal_ref:
+        diff = abs(seasonal_forecast - nonseasonal_ref) / nonseasonal_ref
+        if diff > DEEP_BACKTEST_SEASONAL_VS_BASE:
+            reasons.append(f"seasonal vs non-seasonal forecast diverge by {diff:.1%}")
+    if short_season_flagged:
+        reasons.append("model fails to reproduce season entry/exit")
+    if history_contradictory:
+        reasons.append("history for this calendar month is contradictory")
+    return bool(reasons), reasons
+
+
+def _run_deep_season_backtest(
+    df: pd.DataFrame,
+    cfg: ForecastConfig,
+    chosen_name: str,
+    all_metrics: dict,
+    target_month: int,
+    on_log: Optional[Callable[[str], None]] = None,
+    should_abort: Optional[Callable[[], bool]] = None,
+) -> Optional[str]:
+    """Section 6: deeper 24-month backtest over only the top-3 models,
+    run only when _should_run_deep_backtest() triggers it."""
+    if len(df) < DEEP_BACKTEST_TEST_LEN + DEEP_BACKTEST_MIN_TRAIN:
+        if on_log is not None:
+            on_log("plausibility: deep backtest skipped (not enough history for a 24m window)")
+        return None
+
+    top3 = [
+        m
+        for m, _ in sorted(all_metrics.items(), key=lambda kv: kv[1]["MAE"])
+        if m != "Ensemble_top3_weighted"
+    ][:DEEP_BACKTEST_TOPK]
+    if chosen_name != "Ensemble_top3_weighted" and chosen_name not in top3:
+        top3.append(chosen_name)
+    deep_cfg = replace(cfg, test_len_if_ge_48=DEEP_BACKTEST_TEST_LEN, test_len_else=DEEP_BACKTEST_TEST_LEN)
+    deep_bt = walk_forward(
+        df,
+        deep_cfg,
+        robust=False,
+        include_arima="AutoARIMA_log" in top3,
+        allowed_models=set(top3),
+        on_log=on_log,
+        should_abort=should_abort,
+    )
+    if not deep_bt.preds_y:
+        return None
+    if chosen_name == "Ensemble_top3_weighted":
+        # The ensemble has no bt.preds_y entry of its own: rebuild it over the
+        # deep window the same way build_ensemble_or_best did for the main backtest.
+        _, deep_pred, _ = build_ensemble_or_best(
+            deep_bt.actual_y, deep_bt.preds_y, topk=DEEP_BACKTEST_TOPK, max_degradation=cfg.ensemble_max_degradation
+        )
+    elif chosen_name in deep_bt.preds_y:
+        deep_pred = deep_bt.preds_y[chosen_name]
+    else:
+        return None
+    reason = season_backtest_reason(deep_bt.periods, deep_bt.actual_y, deep_pred, target_month)
+    return f"deep {DEEP_BACKTEST_TEST_LEN}m backtest confirms: {reason}" if reason else None
+
+
+def evaluate_plausibility(
+    df: pd.DataFrame,
+    cfg: ForecastConfig,
+    chosen_name: str,
+    chosen_bt_forecast: np.ndarray,
+    short_season_reason: Optional[str],
+    target_month: int,
+    seasonality: SeasonalityInfo,
+    full_y: dict[str, float],
+    all_metrics: dict,
+    bt: BacktestResult,
+    point_y: float,
+    on_log: Optional[Callable[[str], None]] = None,
+    should_abort: Optional[Callable[[], bool]] = None,
+) -> PlausibilityResult:
+    """Full plausibility pipeline for one forecast: base checks (section 4),
+    the short-season disqualification reason (section 5), and the triggered
+    deep-backtest confirmation (section 6).
+
+    `chosen_bt_forecast` is the backtest series for whatever was actually
+    chosen (a single model's own bt.preds_y entry, or the ensemble's blended
+    series, which never has its own bt.preds_y key) - using bt.preds_y.get()
+    here would silently skip the backtest-based checks for ensemble results.
+    """
+    plausibility = check_plausibility(
+        point_forecast=point_y,
+        target_month=target_month,
+        df=df,
+        seasonality=seasonality,
+        full_y=full_y,
+        bt_periods=bt.periods,
+        bt_actual=bt.actual_y,
+        bt_chosen_pred=chosen_bt_forecast,
+    )
+    if short_season_reason:
+        plausibility.unstable = True
+        plausibility.reasons.append(short_season_reason)
+
+    seasonal_model_values = [v for m, v in full_y.items() if is_seasonal_model(m)]
+    nonseasonal_candidates = list(full_y.values())
+    nonseasonal_ref = float(np.median(nonseasonal_candidates)) if nonseasonal_candidates else None
+    history_contradictory = calendar_month_history_is_contradictory(df, target_month)
+    run_deep, deep_reasons = _should_run_deep_backtest(
+        seasonal_model_values=seasonal_model_values,
+        seasonal_forecast=point_y if plausibility.seasonal else None,
+        nonseasonal_ref=nonseasonal_ref,
+        short_season_flagged=bool(short_season_reason),
+        history_contradictory=history_contradictory,
+    )
+    if run_deep:
+        if on_log is not None:
+            on_log(f"plausibility: deep backtest triggered ({'; '.join(deep_reasons)})")
+        deep_reason = _run_deep_season_backtest(
+            df, cfg, chosen_name, all_metrics, target_month, on_log=on_log, should_abort=should_abort
+        )
+        if deep_reason:
+            plausibility.unstable = True
+            plausibility.reasons.append(deep_reason)
+
+    return plausibility

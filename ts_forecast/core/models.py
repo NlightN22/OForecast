@@ -202,6 +202,51 @@ def should_use_model(allowed_models: Optional[set[str]], name: str) -> bool:
     return allowed_models is None or name in allowed_models
 
 
+def resolve_allowed_models(
+    ets_trends: Iterable,
+    ets_seasonals: Iterable,
+    models: Optional[list[str]],
+    use_all: bool,
+    on_log=None,
+) -> Optional[set[str]]:
+    """Resolve the client-requested model list into an allowed-model set,
+    dropping unknown names and names unavailable in this environment."""
+
+    def log(msg: str) -> None:
+        if on_log is not None:
+            on_log(msg)
+
+    all_models = set(model_catalog(ets_trends, ets_seasonals))
+    if use_all or not models:
+        allowed: Optional[set[str]] = None
+    else:
+        requested = [m for m in models if m in all_models]
+        unknown = [m for m in models if m not in all_models]
+        if unknown:
+            log(f"models: ignoring unknown: {', '.join(unknown)}")
+        allowed = set(requested) if requested else None
+        if allowed is None:
+            log("models: none selected, using all")
+
+    if allowed is not None:
+        if not HAS_PMDARIMA and "AutoARIMA_log" in allowed:
+            allowed.discard("AutoARIMA_log")
+            log("models: AutoARIMA_log skipped (pmdarima unavailable)")
+        if not HAS_STATSFORECAST:
+            sf_removed = {m for m in allowed if m.startswith("SF_")}
+            if sf_removed:
+                allowed.difference_update(sf_removed)
+                log("models: statsforecast models skipped (unavailable)")
+        if not HAS_SKTIME and "TBATS_y" in allowed:
+            allowed.discard("TBATS_y")
+            log("models: TBATS_y skipped (sktime unavailable)")
+        if not allowed:
+            log("models: no available selections, using all")
+            allowed = None
+
+    return allowed
+
+
 def tbats_forecast_y(
     y_train: np.ndarray,
     seasonal_periods: int,
