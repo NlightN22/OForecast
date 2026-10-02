@@ -26,18 +26,25 @@ def disqualify_for_short_season(
     target_month: int,
     bt: BacktestResult,
     chosen_name: str,
+    chosen_bt_forecast: np.ndarray,
     all_metrics: dict,
 ) -> tuple[str, Optional[str]]:
     """Section 5: a model that forecasts the year well on average but
     systematically misses the entry/exit of a short (2-3 month) season
-    must not be chosen for that season's months."""
+    must not be chosen for that season's months.
+
+    `chosen_bt_forecast` is the backtest series for whatever was actually
+    chosen, including the ensemble blend (which has no bt.preds_y entry of
+    its own) - looking it up via bt.preds_y[chosen_name] would silently skip
+    this disqualification whenever the ensemble was selected.
+    """
     groups = [
         g
         for g in contiguous_month_groups(seasonality.seasonal_months)
         if 1 < len(g) <= SHORT_SEASON_MAX_LEN
     ]
     group = next((g for g in groups if target_month in g), None)
-    if group is None or chosen_name not in bt.preds_y:
+    if group is None:
         return chosen_name, None
 
     pre_month = (group[0] - 2) % 12 + 1
@@ -53,7 +60,7 @@ def disqualify_for_short_season(
             wape(bt.actual_y, pred),
         )
 
-    chosen_boundary, chosen_overall = boundary_wape(bt.preds_y[chosen_name])
+    chosen_boundary, chosen_overall = boundary_wape(chosen_bt_forecast)
     if (
         np.isnan(chosen_boundary)
         or np.isnan(chosen_overall)
@@ -179,12 +186,10 @@ def evaluate_plausibility(
     """
     plausibility = check_plausibility(
         point_forecast=point_y,
-        chosen_name=chosen_name,
         target_month=target_month,
         df=df,
         seasonality=seasonality,
         full_y=full_y,
-        all_metrics=all_metrics,
         bt_periods=bt.periods,
         bt_actual=bt.actual_y,
         bt_chosen_pred=chosen_bt_forecast,
@@ -194,7 +199,7 @@ def evaluate_plausibility(
         plausibility.reasons.append(short_season_reason)
 
     seasonal_model_values = [v for m, v in full_y.items() if is_seasonal_model(m)]
-    nonseasonal_candidates = [v for m, v in full_y.items() if m != "Ensemble_top3_weighted"]
+    nonseasonal_candidates = list(full_y.values())
     nonseasonal_ref = float(np.median(nonseasonal_candidates)) if nonseasonal_candidates else None
     history_contradictory = calendar_month_history_is_contradictory(df, target_month)
     run_deep, deep_reasons = _should_run_deep_backtest(

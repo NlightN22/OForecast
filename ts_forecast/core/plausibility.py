@@ -40,6 +40,16 @@ def season_backtest_reason(
     return None
 
 
+def _signed_bias_pct(bt_actual: np.ndarray, bt_pred: np.ndarray) -> Optional[float]:
+    """Signed bias (over-/under-forecasting tendency), normalized by total
+    actual volume - unlike MAPE/sMAPE this is signed, so it measures a
+    systematic lean rather than error magnitude."""
+    denom = float(np.sum(np.abs(bt_actual)))
+    if denom == 0:
+        return None
+    return float(100.0 * np.sum(bt_pred - bt_actual) / denom)
+
+
 def _analogous_change_reason(
     point_forecast: float, reference: Optional[float], bt_actual: np.ndarray
 ) -> Optional[str]:
@@ -76,12 +86,10 @@ class PlausibilityResult:
 
 def check_plausibility(
     point_forecast: float,
-    chosen_name: str,
     target_month: int,
     df: pd.DataFrame,
     seasonality: SeasonalityInfo,
     full_y: dict[str, float],
-    all_metrics: dict,
     bt_periods: list,
     bt_actual: np.ndarray,
     bt_chosen_pred: Optional[np.ndarray],
@@ -135,7 +143,7 @@ def check_plausibility(
             seasonal_scale_ratio=anchor.scale_ratio,
         )
 
-    candidate_vals = [v for m, v in full_y.items() if m != "Ensemble_top3_weighted"]
+    candidate_vals = list(full_y.values())
     if not candidate_vals:
         return PlausibilityResult(False, ["no candidate models"], seasonal=False)
 
@@ -152,14 +160,15 @@ def check_plausibility(
                 f"(>{NON_SEASONAL_INSTABILITY_THRESHOLD:.0%})"
             )
 
-    chosen_metrics = all_metrics.get(chosen_name, {})
-    bias = chosen_metrics.get("MAPE")
-    if bias is not None and not np.isnan(bias) and bias > NON_SEASONAL_BIAS_THRESHOLD * 100:
-        reasons.append(
-            f"chosen model absolute bias {bias:.1f}% > {NON_SEASONAL_BIAS_THRESHOLD:.0%}"
-        )
-
     if bt_chosen_pred is not None:
+        bias = _signed_bias_pct(bt_actual, bt_chosen_pred)
+        if bias is not None and abs(bias) > NON_SEASONAL_BIAS_THRESHOLD * 100:
+            direction = "over" if bias > 0 else "under"
+            reasons.append(
+                f"chosen model has a {abs(bias):.1f}% {direction}-forecasting bias "
+                f"(>{NON_SEASONAL_BIAS_THRESHOLD:.0%})"
+            )
+
         analog_reason = _analogous_change_reason(point_forecast, ref, bt_actual)
         if analog_reason:
             reasons.append(analog_reason)

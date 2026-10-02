@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Response
 
 from ..core.service import run_forecast
 from ..interfaces.schemas import ForecastRequest, ForecastResponse, forecast_response_from_result
-from .cancel import clear_cancel_event, get_cancel_event, sweep_stale_cancel_events
+from .cancel import clear_cancel_event, get_cancel_event, mark_run_active, sweep_stale_cancel_events
 
 JobState = Literal["running", "done", "error"]
 
@@ -48,6 +48,7 @@ def _sweep_finished_jobs(max_age_seconds: float = JOB_TTL_SECONDS) -> None:
 
 def _run_job(run_id: str, payload: ForecastRequest) -> None:
     cancel_event = get_cancel_event(run_id)
+    mark_run_active(run_id)
     job = JOBS[run_id]
     try:
         res = run_forecast(
@@ -73,9 +74,7 @@ def _run_job(run_id: str, payload: ForecastRequest) -> None:
 @router.post("/forecast/jobs", status_code=202)
 def create_forecast_job(payload: ForecastRequest, response: Response) -> dict:
     _sweep_finished_jobs()
-    with JOBS_LOCK:
-        running_ids = frozenset(rid for rid, job in JOBS.items() if job.status == "running")
-    sweep_stale_cancel_events(running_ids)
+    sweep_stale_cancel_events()
     run_id = payload.run_id or str(uuid.uuid4())
 
     with JOBS_LOCK:

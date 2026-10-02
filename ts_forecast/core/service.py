@@ -128,7 +128,7 @@ def run_forecast(
     short_season_reason: Optional[str] = None
     if target_month is not None and seasonality.confirmed:
         chosen_name, short_season_reason = disqualify_for_short_season(
-            seasonality, target_month, bt, chosen_name, all_metrics
+            seasonality, target_month, bt, chosen_name, chosen_bt_forecast, all_metrics
         )
         if short_season_reason:
             log(f"plausibility: {short_season_reason}")

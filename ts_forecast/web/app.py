@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 
 from ..core.service import run_forecast, format_result_text
 from ..interfaces.schemas import ForecastRequest, ForecastResponse, forecast_response_from_result
-from .cancel import clear_cancel_event, get_cancel_event
+from .cancel import clear_cancel_event, get_cancel_event, mark_run_active
 from .form import render_form
 from .jobs import router as jobs_router
 
@@ -78,6 +78,7 @@ def forecast_stream(payload: ForecastRequest) -> StreamingResponse:
     done = threading.Event()
     run_id = payload.run_id or str(uuid.uuid4())
     cancel_event = get_cancel_event(run_id)
+    mark_run_active(run_id)
 
     def on_log(msg: str) -> None:
         q.put(("log", msg))
